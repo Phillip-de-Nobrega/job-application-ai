@@ -1,0 +1,9 @@
+data/
+documents/
+node_modules/
+package-lock.json
+playwright/.auth/
+*.pyc
+__pycache__/
+.env
+.DS_Store
