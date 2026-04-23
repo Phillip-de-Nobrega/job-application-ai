@@ -819,6 +819,7 @@ def init_db() -> None:
                 description text not null default '',
                 raw_json text not null default '{}',
                 status text not null default 'new',
+                too_senior integer not null default 0,
                 score integer not null default 0,
                 score_reasons text not null default '',
                 concerns text not null default '',
@@ -1001,6 +1002,7 @@ def init_db() -> None:
         ensure_column(conn, "applications", "checklist", "text not null default ''")
         ensure_column(conn, "applications", "truthfulness_flags", "text not null default ''")
         ensure_column(conn, "applications", "recommended_cv_version", "text not null default ''")
+        ensure_column(conn, "jobs", "too_senior", "integer not null default 0")
         seed_default_cv_versions(conn)
         seed_default_answer_bank(conn)
         seed_default_story_bank(conn)
@@ -1568,6 +1570,9 @@ def score_job(job: dict[str, Any]) -> tuple[int, str, str]:
         concerns.append(salary_concern)
         if "below the" in salary_concern.lower():
             total -= 25
+    if int(job.get("too_senior") or 0):
+        total -= 30
+        concerns.append("Phillip marked this role as too senior for the current search.")
     total = max(0, min(100, total))
     return total, "\n".join(reasons), "\n".join(concerns)
 
@@ -2246,6 +2251,7 @@ def shortlist_top_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, An
         select id, company, title, score
         from jobs
         where status in ('new', 'drafted', 'shortlisted')
+          and coalesce(too_senior, 0) = 0
           and score >= 35
           and lower(concerns) not like '%role-title mismatch%'
           and lower(concerns) not like '%potential scam%'
@@ -2261,6 +2267,7 @@ def shortlist_top_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, An
           and lower(concerns) not like '%remote role is tied to a specific city/country%'
           and lower(concerns) not like '%remote role appears restricted%'
           and lower(concerns) not like '%remote role text suggests geographic restrictions%'
+          and lower(concerns) not like '%marked this role as too senior%'
           and lower(concerns) not like '%would require relocation%'
           and lower(concerns) not like '%local/eu work authorization%'
           and lower(concerns) not like '%us non-remote%'
@@ -5500,6 +5507,17 @@ class AppHandler(BaseHTTPRequestHandler):
                         )
                     conn.commit()
                 self.json({"ok": True})
+            elif parsed.path == "/api/jobs/too-senior":
+                with connect() as conn:
+                    job_id = int(data.get("id"))
+                    flagged = 1 if data.get("too_senior", True) else 0
+                    conn.execute(
+                        "update jobs set too_senior=?, updated_at=? where id=?",
+                        (flagged, now_iso(), job_id),
+                    )
+                    conn.commit()
+                    result = rescore_all_jobs(conn)
+                self.json({"ok": True, **result})
             elif parsed.path == "/api/jobs/shortlist-top":
                 limit = int(data.get("limit") or 5)
                 with connect() as conn:
@@ -7120,6 +7138,7 @@ Record:
               <div>
                 <span class="tag">${escapeHtml(job.status)}</span>
                 <span class="tag">${escapeHtml(job.source)}</span>
+                ${job.too_senior ? `<span class="tag">too senior</span>` : ""}
               </div>
               ${job.url ? `<p class="meta"><a href="${escapeAttr(job.url)}" target="_blank" rel="noreferrer">${escapeHtml(job.url)}</a></p>` : ""}
               <pre>${escapeHtml(job.score_reasons || "")}${job.concerns ? "\n\nConcerns:\n" + escapeHtml(job.concerns) : ""}</pre>
@@ -7127,6 +7146,7 @@ Record:
               <div class="actions">
                 <button class="btn" onclick="setJobStatus(${job.id}, 'shortlisted')">Shortlist</button>
                 <button class="btn primary" onclick="generateApplication(${job.id})">Generate draft</button>
+                <button class="btn" onclick="setTooSenior(${job.id}, ${job.too_senior ? "false" : "true"})">${job.too_senior ? "Allow again" : "Too senior for me"}</button>
                 <button class="btn" onclick="setJobStatus(${job.id}, 'applied')">Mark applied</button>
                 <button class="btn" onclick="setJobStatus(${job.id}, 'rejected')">Reject</button>
               </div>
@@ -7618,6 +7638,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <button class="btn primary" onclick="saveApplication()">Save draft</button>
           <button class="btn" onclick="humanizeApplication()">Humanize sent copy</button>
           <button class="btn" onclick="researchApplication()">Research company</button>
+          <button class="btn" onclick="useSavedResearchUrlNow()">Use saved URL now</button>
           <button class="btn" onclick="regenerateFollowUp()">Regenerate personalized follow-up</button>
           <button class="btn" onclick="prepareApplicationForm()">Prepare form</button>
           <button class="btn warn" onclick="markApplicationSubmitted()">Mark submitted</button>
@@ -8026,6 +8047,17 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       await load();
     }
 
+    async function setTooSenior(id, too_senior) {
+      await api("/api/jobs/too-senior", {method: "POST", body: JSON.stringify({id, too_senior})});
+      message(too_senior ? "Job marked as too senior for this search." : "Job returned to the active pool.");
+      await load();
+      if (document.getElementById("job_filter")?.value === "shortlisted") {
+        await api("/api/jobs/shortlist-top", {method: "POST", body: JSON.stringify({limit: 5})});
+        await load();
+      }
+      renderJobs();
+    }
+
     async function rescoreJobs() {
       const result = await api("/api/jobs/rescore", {method: "POST", body: "{}"});
       message(`Rescored ${result.count || 0} jobs.`);
@@ -8123,6 +8155,26 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       document.getElementById("edit_research_notes").value = result.research_notes || "";
       document.getElementById("edit_research_sources").value = result.research_sources || "";
       message("Company research notes generated.");
+      await load();
+    }
+
+    async function useSavedResearchUrlNow() {
+      if (!selectedApplication) return;
+      const saved = document.getElementById("edit_research_url").value.trim() || selectedApplication.research_url || "";
+      if (!saved) {
+        message("There is no saved research URL for this application yet.", "bad");
+        return;
+      }
+      const payload = {
+        id: selectedApplication.id,
+        research_url: saved,
+        company_notes: document.getElementById("edit_company_notes").value
+      };
+      const result = await api("/api/applications/research", {method: "POST", body: JSON.stringify(payload)});
+      document.getElementById("edit_research_url").value = result.research_url || saved;
+      document.getElementById("edit_research_notes").value = result.research_notes || "";
+      document.getElementById("edit_research_sources").value = result.research_sources || "";
+      message("Saved research URL used for a fresh research pass.");
       await load();
     }
 

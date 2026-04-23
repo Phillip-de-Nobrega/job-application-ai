@@ -253,6 +253,8 @@ These were generated into `documents/` and tracked in the local database.
 - Company research now ignores job-board homepages like Remote OK, Remotive, and Arbeitnow when trying to infer company pages.
 - Added official research URL defaults for Avida, Happily, Maneuver Marketing, Coalition Technologies, Brandwatch, and Red Bull.
 - Added a small Cape Town priority in shortlist ordering when jobs are otherwise close, and increased manager/director seniority penalties.
+- Added a persistent `too senior for me` job flag in the Jobs view; flagged jobs are rescored down and excluded from the shortlist.
+- Added a `Use saved URL now` button in the Applications view so Phillip can rerun company research from the saved research URL without retyping it.
 - Restarted the LaunchAgent after code changes.
 - Ran Auto Mode. Result: 27 sources ran, 663 jobs imported/updated, 538 jobs rescored, 5 jobs shortlisted, 5 drafts generated, 5 drafts humanized, 20 applications assessed, weekly report regenerated, reminders exported, inbox scan checked 80 messages and imported 6 new inbox messages.
 - Current app state after this run: 538 jobs, 20 applications, 35 sources, 29 enabled sources, 36 target companies, 3 automation runs, 80 inbox messages.
