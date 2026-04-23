@@ -760,6 +760,15 @@ STARTER_TARGET_COMPANIES = [
     },
 ]
 
+KNOWN_COMPANY_RESEARCH_URLS = {
+    "avida": "https://www.avida.life/",
+    "happily": "https://teamhappily.com/",
+    "maneuver marketing": "https://maneuvermarketing.com/",
+    "coalition technologies": "https://coalitiontechnologies.co/about-us/",
+    "brandwatch": "https://www.brandwatch.com/company/about/",
+    "redbull": "https://www.redbull.com/company",
+}
+
 DEFAULT_EMAIL_ENV = {
     "JOB_AI_SMTP_HOST": "smtp.mweb.co.za",
     "JOB_AI_SMTP_PORT": "587",
@@ -1333,10 +1342,10 @@ def assess_role_level(title: str, text: str) -> tuple[int, list[str], list[str]]
         if term in lower_title or (term.endswith("+ years") and term in lower_text)
     ]
     if senior_hits:
-        delta -= 22
+        delta -= 26
         concerns.append("Possible seniority mismatch: " + ", ".join(senior_hits[:4]))
     elif "manager" in lower_title and not any(term in lower_title for term in ["assistant", "junior", "intern"]):
-        delta -= 8
+        delta -= 14
         concerns.append("Manager title may be above graduate/junior level; review requirements.")
 
     hard_non_target_hits = [term for term in HARD_NON_TARGET_TITLE_SIGNALS if term in lower_title]
@@ -2257,8 +2266,13 @@ def shortlist_top_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, An
           and lower(concerns) not like '%us non-remote%'
           and lower(concerns) not like '%hybrid role may require%'
         order by
-          case when lower(location) like '%remote%' then 1 else 0 end desc,
+          (score
+            + case when lower(location) like '%cape town%' or lower(location) like '%western cape%' then 6 else 0 end
+            - case when lower(concerns) like '%manager title may be above graduate/junior level%' then 4 else 0 end
+            - case when lower(concerns) like '%possible seniority mismatch%' then 8 else 0 end
+          ) desc,
           case when lower(location) like '%cape town%' or lower(location) like '%western cape%' then 1 else 0 end desc,
+          case when lower(location) like '%remote%' then 1 else 0 end desc,
           score desc,
           updated_at desc
         limit ?
@@ -3910,6 +3924,9 @@ def company_research_url_candidates(
 ) -> list[str]:
     application = application or {}
     candidates: list[str] = []
+    company_key = normalize_space(str(job.get("company", ""))).lower()
+    if company_key in KNOWN_COMPANY_RESEARCH_URLS:
+        candidates.append(KNOWN_COMPANY_RESEARCH_URLS[company_key])
     for value in [research_url, str(application.get("research_url", ""))]:
         value = normalize_space(value)
         if value:

@@ -251,12 +251,14 @@ These were generated into `documents/` and tracked in the local database.
 - Shortlist now considers drafted roles as part of the active review queue, so stronger existing opportunities do not get replaced by weaker new ones.
 - Draft generation now pulls more specific role priorities from each posting for cover letters, answers, and follow-up emails.
 - Company research now ignores job-board homepages like Remote OK, Remotive, and Arbeitnow when trying to infer company pages.
+- Added official research URL defaults for Avida, Happily, Maneuver Marketing, Coalition Technologies, Brandwatch, and Red Bull.
+- Added a small Cape Town priority in shortlist ordering when jobs are otherwise close, and increased manager/director seniority penalties.
 - Restarted the LaunchAgent after code changes.
 - Ran Auto Mode. Result: 27 sources ran, 663 jobs imported/updated, 538 jobs rescored, 5 jobs shortlisted, 5 drafts generated, 5 drafts humanized, 20 applications assessed, weekly report regenerated, reminders exported, inbox scan checked 80 messages and imported 6 new inbox messages.
 - Current app state after this run: 538 jobs, 20 applications, 35 sources, 29 enabled sources, 36 target companies, 3 automation runs, 80 inbox messages.
 - Latest generated application packs are in `documents/` for Happily, Maneuver Marketing, Coalition Technologies, Spacedome Media GmbH, and Adswerve.
 - Known issue: Auto Mode still tries some weak/failing public careers pages; currently seen errors include Sporty Group 404 and Yoco timeout. Use Source Cleanup / Pause failing sources if they keep failing.
-- After cleanup and shortlist retuning later the same day, enabled sources dropped to 17 and the preferred active five became Avida, Happily, Maneuver Marketing, Coalition Technologies, and Brandwatch.
+- After cleanup and shortlist retuning later the same day, enabled sources dropped to 17 and the preferred active five became Happily, Avida, Maneuver Marketing, Coalition Technologies, and Red Bull Cape Town.
 
 ## Earlier Session Update - 2026-04-23
 
