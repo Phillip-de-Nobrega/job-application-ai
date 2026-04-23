@@ -246,11 +246,17 @@ These were generated into `documents/` and tracked in the local database.
 - Added location hints from careers-page context when Cape Town, Western Cape, Johannesburg, Durban, or remote wording is visible.
 - Added duplicate company/title suppression in the daily shortlist.
 - Fixed short keyword matching so location keyword `uk` does not trigger inside unrelated words.
+- Tightened remote eligibility checks using full posting text, so remote jobs with hidden geography restrictions or city-tied remote wording are flagged harder.
+- Added low-yield source cleanup for public careers-page URLs returning repeated `no-visible-jobs`, and paused 12 such weak sources plus timeout/failure cases.
+- Shortlist now considers drafted roles as part of the active review queue, so stronger existing opportunities do not get replaced by weaker new ones.
+- Draft generation now pulls more specific role priorities from each posting for cover letters, answers, and follow-up emails.
+- Company research now ignores job-board homepages like Remote OK, Remotive, and Arbeitnow when trying to infer company pages.
 - Restarted the LaunchAgent after code changes.
 - Ran Auto Mode. Result: 27 sources ran, 663 jobs imported/updated, 538 jobs rescored, 5 jobs shortlisted, 5 drafts generated, 5 drafts humanized, 20 applications assessed, weekly report regenerated, reminders exported, inbox scan checked 80 messages and imported 6 new inbox messages.
 - Current app state after this run: 538 jobs, 20 applications, 35 sources, 29 enabled sources, 36 target companies, 3 automation runs, 80 inbox messages.
 - Latest generated application packs are in `documents/` for Happily, Maneuver Marketing, Coalition Technologies, Spacedome Media GmbH, and Adswerve.
 - Known issue: Auto Mode still tries some weak/failing public careers pages; currently seen errors include Sporty Group 404 and Yoco timeout. Use Source Cleanup / Pause failing sources if they keep failing.
+- After cleanup and shortlist retuning later the same day, enabled sources dropped to 17 and the preferred active five became Avida, Happily, Maneuver Marketing, Coalition Technologies, and Brandwatch.
 
 ## Earlier Session Update - 2026-04-23
 

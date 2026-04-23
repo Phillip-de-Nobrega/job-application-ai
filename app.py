@@ -179,6 +179,32 @@ REMOTE_RESTRICTED_LOCATION_TERMS = [
     "israel",
 ]
 
+REMOTE_RESTRICTION_PATTERNS = [
+    "must be based in",
+    "must reside in",
+    "must live in",
+    "must be located in",
+    "you must be located in",
+    "applicants must be located in",
+    "location:",
+    "us only",
+    "u.s. only",
+    "europe only",
+    "eu only",
+    "uk only",
+    "remote within",
+    "remote in the us",
+    "remote in the united states",
+    "remote in europe",
+    "remote in germany",
+    "remote role based in",
+    "remote position based in",
+    "based in dublin",
+    "based in ireland",
+    "based in berlin",
+    "based in london",
+]
+
 OUTSIDE_CAPE_PHYSICAL_TERMS = [
     "johannesburg",
     "durban",
@@ -221,6 +247,8 @@ SENIORITY_WARNINGS = [
     "senior ",
     "sr. ",
     "sr ",
+    "director",
+    "director ",
     "senior director",
     "director of",
     "vp ",
@@ -274,6 +302,7 @@ NON_TARGET_TITLE_SIGNALS = [
     "accounting",
     "customer success",
     "sales ",
+    "revenue specialist",
     "ml ",
     "machine learning",
     "data scientist",
@@ -286,6 +315,9 @@ NON_TARGET_TITLE_SIGNALS = [
     "finance",
     "accountant",
     "legal",
+    "learning and development",
+    "learning & development",
+    "training specialist",
     "warehouse",
     "retail associate",
     "sales assistant",
@@ -1337,6 +1369,7 @@ def assess_role_level(title: str, text: str) -> tuple[int, list[str], list[str]]
 def assess_location_fit(location: str, text: str) -> tuple[int, list[str], list[str]]:
     loc_lower = location.lower()
     lower = f"{location} {text}".lower()
+    text_lower = text.lower()
     delta = 0
     reasons: list[str] = []
     concerns: list[str] = []
@@ -1397,6 +1430,20 @@ def assess_location_fit(location: str, text: str) -> tuple[int, list[str], list[
     outside_cape_physical = any(term in loc_lower for term in OUTSIDE_CAPE_PHYSICAL_TERMS)
     remote_location_allowed = any(term in f" {loc_lower} " for term in REMOTE_ALLOWED_LOCATION_TERMS)
     remote_location_restricted = any(term in loc_lower for term in REMOTE_RESTRICTED_LOCATION_TERMS)
+    remote_tied_to_specific_city = (
+        remote
+        and (
+            any(term in loc_lower for term in OUTSIDE_CAPE_PHYSICAL_TERMS)
+            or loc_lower.startswith("remote - ")
+        )
+        and not any(term in loc_lower for term in ["worldwide", "anywhere", "global", "europe", "emea", "uk", "united kingdom", "usa", "united states", "south africa"])
+    )
+    text_remote_restricted = (
+        remote
+        and any(pattern in text_lower for pattern in REMOTE_RESTRICTION_PATTERNS)
+        and not any(term in text_lower for term in ["work from anywhere", "anywhere in the world", "globally remote", "global remote"])
+        and not any(term in text_lower for term in ["south africa", "cape town"])
+    )
     remote_based_elsewhere = (
         remote
         and outside_cape_physical
@@ -1411,9 +1458,15 @@ def assess_location_fit(location: str, text: str) -> tuple[int, list[str], list[
     if remote_based_elsewhere:
         delta -= 24
         concerns.append("Remote role appears based in a physical location outside Cape Town; confirm South Africa eligibility before applying.")
+    elif remote_tied_to_specific_city:
+        delta -= 24
+        concerns.append("Remote role is tied to a specific city/country; confirm South Africa eligibility before applying.")
     elif remote and remote_location_restricted and not remote_location_allowed:
         delta -= 20
         concerns.append("Remote role appears restricted to locations outside Phillip's Cape Town/USA/UK/Europe target; avoid unless eligibility is clear.")
+    elif text_remote_restricted:
+        delta -= 26
+        concerns.append("Remote role text suggests geographic restrictions; confirm South Africa eligibility before applying.")
     if cape_town:
         delta += 18
         reasons.append("Cape Town in-person/hybrid location fit.")
@@ -2183,7 +2236,7 @@ def shortlist_top_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, An
         """
         select id, company, title, score
         from jobs
-        where status in ('new', 'shortlisted')
+        where status in ('new', 'drafted', 'shortlisted')
           and score >= 35
           and lower(concerns) not like '%role-title mismatch%'
           and lower(concerns) not like '%potential scam%'
@@ -2196,7 +2249,9 @@ def shortlist_top_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, An
           and lower(concerns) not like '%physical location is not cape town%'
           and lower(concerns) not like '%listed physical location is not cape town%'
           and lower(concerns) not like '%remote role appears based%'
+          and lower(concerns) not like '%remote role is tied to a specific city/country%'
           and lower(concerns) not like '%remote role appears restricted%'
+          and lower(concerns) not like '%remote role text suggests geographic restrictions%'
           and lower(concerns) not like '%would require relocation%'
           and lower(concerns) not like '%local/eu work authorization%'
           and lower(concerns) not like '%us non-remote%'
@@ -2869,7 +2924,10 @@ def source_cleanup_recommendations(conn: sqlite3.Connection) -> list[dict[str, A
         elif last_result:
             try:
                 payload = json.loads(last_result)
-                if int(payload.get("count", 0)) == 0:
+                if source.get("source_type") == "url" and payload.get("mode") == "no-visible-jobs":
+                    reason = "Public careers page produced no visible job links; low-yield source."
+                    action = "pause-low-yield"
+                elif int(payload.get("count", 0)) == 0:
                     reason = "Last run imported 0 jobs."
                     action = "review-query"
             except Exception:
@@ -2891,7 +2949,11 @@ def source_cleanup_recommendations(conn: sqlite3.Connection) -> list[dict[str, A
 
 def pause_failing_sources(conn: sqlite3.Connection) -> dict[str, Any]:
     recs = source_cleanup_recommendations(conn)
-    ids = [int(rec["id"]) for rec in recs if rec.get("action") == "pause-or-fix" and rec.get("enabled")]
+    ids = [
+        int(rec["id"])
+        for rec in recs
+        if rec.get("action") in {"pause-or-fix", "pause-low-yield"} and rec.get("enabled")
+    ]
     if ids:
         placeholders = ",".join("?" for _ in ids)
         conn.execute(
@@ -3426,23 +3488,21 @@ def generate_cover_letter(profile: dict[str, str], job: dict[str, Any]) -> str:
     name = profile.get("full_name", "Phillip")
     title = job.get("title") or "the role"
     company = job.get("company") or "your team"
-    preferred = profile.get("preferred_industries", "")
-    targets = profile.get("target_roles", "")
-    cv_text = profile.get("cv_text", "").strip()
-    evidence = summarize_profile_evidence(cv_text)
-    company_angle = company_angle_from_job(job.get("description", ""))
+    company_hook = company_hook_from_job(job)
+    role_priorities = summarize_role_priorities(job.get("description", ""))
+    fit_line = fit_summary_for_job(profile, job)
 
     return phillip_voice_text(textwrap.dedent(
         f"""
         Dear {company} hiring team,
 
-        I am applying for the {title} role because it sits close to the kind of marketing work I am targeting: {targets}
+        I am applying for the {title} role because {company_hook}
 
-        My strongest fit is the combination of marketing judgement, practical execution, and interest in brands connected to {preferred.lower()} {evidence}
+        What stands out to me in the role is the focus on {role_priorities}
 
-        From the role description, the priorities appear to include {company_angle}. I would approach this by focusing on clear audience insight, strong campaign execution, measurable outcomes, and brand consistency across the customer journey.
+        {fit_line}
 
-        I would welcome the chance to discuss how my background can support {company}'s marketing goals.
+        I would welcome the chance to discuss how I could support {company}'s marketing work in a practical, commercially useful way.
 
         Kind regards,
         {name}
@@ -3469,6 +3529,37 @@ def summarize_profile_evidence(cv_text: str) -> str:
     return "Evidence from my background includes: " + " ".join(useful)
 
 
+def company_hook_from_job(job: dict[str, Any]) -> str:
+    company = normalize_space(str(job.get("company", ""))) or "the company"
+    description = normalize_space(str(job.get("description", "")))
+    lower = description.lower()
+    if "event" in lower and "saas" in lower:
+        return f"{company} is building a product around live events and customer experience, which is the kind of practical marketing environment I want to work in."
+    if "supplement" in lower or "wellness brand" in lower or "health and wellness" in lower:
+        return f"{company} is operating in a health and wellness space that matches my interest in fitness-adjacent consumer brands."
+    if "seo" in lower and "content" in lower:
+        return f"the role combines writing, research, SEO, and brand messaging in a way that fits the work I want to build on."
+    if "media" in lower and "analytics" in lower:
+        return f"the role sits at the point where media strategy, analytics, and client-facing communication meet, which is a strong fit for how I like to work."
+    return f"it sits close to the kind of marketing work I am targeting: practical brand, content, campaign, and growth work."
+
+
+def summarize_role_priorities(description: str) -> str:
+    priorities = job_priority_points(description)
+    if priorities:
+        return ", ".join(priorities[:4])
+    return company_angle_from_job(description)
+
+
+def fit_summary_for_job(profile: dict[str, str], job: dict[str, Any]) -> str:
+    strengths = profile_strengths_for_job(profile, job)
+    role_priorities = summarize_role_priorities(str(job.get("description", "")))
+    return (
+        f"My background is strongest around {strengths}. That gives me a good base to contribute across {role_priorities}, "
+        "while bringing a grounded, early-career perspective and a willingness to do the work properly."
+    )
+
+
 def company_angle_from_job(description: str) -> str:
     lower = description.lower()
     angles: list[str] = []
@@ -3490,6 +3581,58 @@ def company_angle_from_job(description: str) -> str:
     if not angles:
         return "understanding the audience, communicating the offer clearly, and improving marketing execution"
     return ", ".join(angles[:5])
+
+
+def job_priority_points(description: str) -> list[str]:
+    lower = normalize_space(description).lower()
+    priorities: list[str] = []
+    checks = [
+        ("hubspot", "HubSpot ownership"),
+        ("seo", "SEO execution"),
+        ("lifecycle", "lifecycle email"),
+        ("email", "email/CRM work"),
+        ("newsletter", "newsletter and content work"),
+        ("landing page", "landing page messaging"),
+        ("copy", "copy and messaging"),
+        ("social", "social content"),
+        ("tiktok", "TikTok strategy"),
+        ("tiktok shop", "TikTok Shop growth"),
+        ("paid ads", "paid ads"),
+        ("meta", "Meta ads"),
+        ("partnership", "partnership marketing"),
+        ("influencer", "influencer work"),
+        ("analytics", "analytics and reporting"),
+        ("reporting", "performance reporting"),
+        ("media planning", "media planning"),
+        ("forecast", "forecasting"),
+        ("client", "client communication"),
+        ("e-commerce", "e-commerce growth"),
+        ("ecommerce", "e-commerce growth"),
+        ("event", "event-focused marketing"),
+        ("saas", "SaaS product marketing"),
+    ]
+    for token, label in checks:
+        if token in lower and label not in priorities:
+            priorities.append(label)
+    return priorities[:6]
+
+
+def profile_strengths_for_job(profile: dict[str, str], job: dict[str, Any]) -> str:
+    lower = f"{job.get('title', '')} {job.get('description', '')}".lower()
+    strengths: list[str] = []
+    if any(token in lower for token in ["seo", "copy", "content", "blog", "landing page"]):
+        strengths.append("writing clear content and adapting tone to different audiences")
+    if any(token in lower for token in ["analytics", "reporting", "data", "research"]):
+        strengths.append("market research and using data to support decisions")
+    if any(token in lower for token in ["social", "tiktok", "creative", "campaign"]):
+        strengths.append("hands-on content and campaign execution")
+    if any(token in lower for token in ["brand", "consumer", "community", "events", "fitness", "wellness"]):
+        strengths.append("brand-aware work with a genuine interest in sport, fitness, and consumer audiences")
+    if any(token in lower for token in ["media", "paid", "performance", "growth"]):
+        strengths.append("commercially focused marketing thinking with a willingness to measure what is working")
+    if not strengths:
+        strengths.append("marketing fundamentals, practical execution, and a willingness to learn quickly")
+    return ", ".join(dedupe_keep_order(strengths)[:3])
 
 
 def generate_cv_notes(profile: dict[str, str], job: dict[str, Any]) -> str:
@@ -3641,13 +3784,15 @@ def voice_check(text: str) -> dict[str, Any]:
 def generate_answers(profile: dict[str, str], job: dict[str, Any]) -> str:
     company = job.get("company") or "the company"
     title = job.get("title") or "this role"
+    priorities = summarize_role_priorities(str(job.get("description", "")))
+    strengths = profile_strengths_for_job(profile, job)
     return phillip_voice_text(textwrap.dedent(
         f"""
         Why are you interested in this role?
-        I am interested in the {title} role because it aligns with my focus on practical marketing work, brand building, campaign execution, and customer-facing growth. {company} appears to need someone who can understand the audience, communicate clearly, and execute with consistency.
+        I am interested in the {title} role because it combines {priorities}, which is the kind of practical marketing work I want to build my career around. I like roles where the work is close to the audience, the message, and the commercial result, and that comes through clearly in this role.
 
         Why should we hire you?
-        I bring a focused marketing mindset, strong interest in sports/fitness/outdoor and consumer brands, and a practical approach to turning ideas into useful campaigns, content, and customer engagement. I would keep the work commercially grounded, brand-aware, and measurable.
+        I would bring {strengths}. I am early-career, but I take the work seriously, I am comfortable learning fast, and I would approach the role with a mix of curiosity, discipline, and practicality rather than trying to sound more senior than I am.
 
         What is your work authorization?
         {profile.get("work_authorization", "Confirm before submitting.")}
@@ -3776,7 +3921,7 @@ def company_research_url_candidates(
         if url_matches_company_tokens(url, company_tokens):
             candidates.append(url)
     job_url = normalize_space(str(job.get("url", "")))
-    if job_url and is_useful_company_url(job_url):
+    if job_url and is_useful_company_url(job_url) and not is_job_board_url(job_url):
         parsed = urllib.parse.urlparse(job_url)
         root = f"{parsed.scheme}://{parsed.netloc}"
         candidates.extend([root, urllib.parse.urljoin(root, "/about"), urllib.parse.urljoin(root, "/careers")])
@@ -3792,10 +3937,32 @@ def extract_research_urls_from_text(text: str) -> list[str]:
     return dedupe_keep_order(urls)
 
 
+def is_job_board_url(url: str) -> bool:
+    lower = url.lower()
+    blocked = [
+        "remoteok.com",
+        "remoteok.io",
+        "remotive.com",
+        "arbeitnow.com",
+        "linkedin.com/jobs",
+        "indeed.com",
+        "greenhouse.io",
+        "lever.co",
+        "ashbyhq.com",
+        "smartrecruiters.com",
+        "recruitee.com",
+        "workable.com",
+        "teamtailor.com",
+    ]
+    return any(term in lower for term in blocked)
+
+
 def is_useful_company_url(url: str) -> bool:
     parsed = urllib.parse.urlparse(url)
     host = parsed.netloc.lower().replace("www.", "")
     if not parsed.scheme.startswith("http") or not host:
+        return False
+    if is_job_board_url(url):
         return False
     reject_hosts = [
         "linkedin.com",
@@ -3946,10 +4113,9 @@ def compose_follow_up(profile: dict[str, str], job: dict[str, Any], application:
     if company_notes:
         company_line = f"What stood out to me about {company} was {company_notes}."
     else:
-        company_line = f"The role stood out because it connects with practical, audience-focused marketing work and brand execution."
+        company_line = f"The role stood out because of its focus on {summarize_role_priorities(str(job.get('description', '')))}."
     background_line = (
-        "My background combines a UCT Business Science Marketing degree, Google Analytics certification, "
-        "hands-on social content work, market research, and a strong personal connection to sport and endurance training."
+        f"My background combines a UCT Business Science Marketing degree, Google Analytics certification, and {profile_strengths_for_job(profile, job)}."
     )
     return phillip_voice_text(textwrap.dedent(
         f"""
@@ -4602,11 +4768,12 @@ def generate_application(conn: sqlite3.Connection, job_id: int) -> int:
     if not job:
         raise RuntimeError("Job not found")
     app_id = ensure_application(conn, job_id)
+    existing_app = row_to_dict(conn.execute("select * from applications where id=?", (app_id,)).fetchone()) or {}
+    research_notes, research_sources, research_url = generate_application_research(job, existing_app, existing_app.get("research_url", ""))
     cover = generate_cover_letter(profile, job)
     cv_notes = generate_cv_notes(profile, job)
     answers = generate_answers(profile, job)
-    follow = generate_follow_up(profile, job)
-    research_notes, research_sources, research_url = generate_application_research(job)
+    follow = compose_follow_up(profile, job, existing_app)
     next_follow_up = (dt.date.today() + dt.timedelta(days=7)).isoformat()
     timestamp = now_iso()
     conn.execute(
@@ -4619,7 +4786,11 @@ def generate_application(conn: sqlite3.Connection, job_id: int) -> int:
         (cover, cv_notes, answers, follow, research_notes, research_sources, research_url, next_follow_up, timestamp, app_id),
     )
     conn.execute(
-        "update jobs set status='drafted', updated_at=? where id=? and status in ('new', 'shortlisted')",
+        """
+        update jobs
+        set status=case when status='new' then 'drafted' else status end, updated_at=?
+        where id=? and status in ('new', 'shortlisted')
+        """,
         (timestamp, job_id),
     )
     conn.execute(
