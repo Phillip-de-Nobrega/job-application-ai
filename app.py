@@ -3458,6 +3458,30 @@ def is_specific_job_url(url: str) -> bool:
     return False
 
 
+def detect_application_platform(url: str, source: str = "") -> str:
+    host = normalize_domain(url)
+    lower_source = normalize_space(source).lower()
+    if host.endswith("linkedin.com") or lower_source.startswith("linkedin"):
+        return "linkedin"
+    if host.endswith("indeed.com") or host.endswith("indeed.co.za") or lower_source.startswith("indeed"):
+        return "indeed"
+    if host.endswith("greenhouse.io") or lower_source.startswith("greenhouse:"):
+        return "greenhouse"
+    if host.endswith("lever.co") or lower_source.startswith("lever:"):
+        return "lever"
+    if host.endswith("ashbyhq.com") or lower_source.startswith("ashby:"):
+        return "ashby"
+    if host.endswith("smartrecruiters.com") or lower_source.startswith("smartrecruiters:"):
+        return "smartrecruiters"
+    if "workable.com" in host or lower_source.startswith("workable:"):
+        return "workable"
+    if "teamtailor.com" in host or lower_source.startswith("teamtailor:"):
+        return "teamtailor"
+    if host.endswith("recruitee.com") or lower_source.startswith("recruitee:"):
+        return "recruitee"
+    return "custom"
+
+
 def looks_like_generic_careers_link(url: str, anchor: str) -> bool:
     cleaned_anchor = normalize_space(anchor).lower().strip(" .:-")
     title = title_from_url(url).lower().strip(" .:-")
@@ -5237,6 +5261,7 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
     conn.commit()
     task = {
         "created_at": started_at,
+        "platform": detect_application_platform(str(job.get("url", "")), str(job.get("source", ""))),
         "profile": profile,
         "job": {
             "id": job.get("id"),
@@ -5331,6 +5356,7 @@ def create_form_fill_smoke_task(conn: sqlite3.Connection) -> Path:
     timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     task = {
         "created_at": now_iso(),
+        "platform": "smoke",
         "profile": profile,
         "job": {
             **job,
@@ -7942,6 +7968,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       const login = report.login || {};
       return `
         <div class="notice ${report.errors?.length ? "bad" : ""}">
+          Platform: ${escapeHtml(report.platform || "unknown")}<br>
           Status: ${escapeHtml(report.status || "unknown")}<br>
           Filled: ${filledCount} field(s)<br>
           Review: ${reviewCount} field(s)<br>

@@ -63,6 +63,52 @@ function readKeychainPassword(credential) {
   }
 }
 
+function hostFromUrl(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch (error) {
+    return "";
+  }
+}
+
+function inferPlatform(task, pageUrl = "") {
+  const explicit = String(task.platform || "").trim().toLowerCase();
+  if (explicit) return explicit;
+  const host = hostFromUrl(pageUrl || task.job?.url || "");
+  if (host.endsWith("linkedin.com")) return "linkedin";
+  if (host.endsWith("indeed.com") || host.endsWith("indeed.co.za")) return "indeed";
+  if (host.endsWith("greenhouse.io")) return "greenhouse";
+  if (host.endsWith("lever.co")) return "lever";
+  if (host.endsWith("ashbyhq.com")) return "ashby";
+  if (host.endsWith("smartrecruiters.com")) return "smartrecruiters";
+  if (host.includes("workable.com")) return "workable";
+  if (host.includes("teamtailor.com")) return "teamtailor";
+  if (host.endsWith("recruitee.com")) return "recruitee";
+  return "custom";
+}
+
+function stepPatternsForPlatform(platform) {
+  const generic = [/^next$/i, /^continue$/i, /save and continue/i, /continue application/i, /next step/i];
+  if (platform === "greenhouse") return [...generic, /review/i];
+  if (platform === "lever") return [...generic, /continue to application/i];
+  if (platform === "ashby") return [...generic, /continue$/i];
+  if (platform === "smartrecruiters") return [...generic, /continue$/i];
+  if (platform === "workable") return [...generic, /continue$/i];
+  return generic;
+}
+
+function finalSubmitPatterns() {
+  return [
+    /^submit$/i,
+    /submit application/i,
+    /complete application/i,
+    /send application/i,
+    /^apply$/i,
+    /^finish$/i,
+    /review and submit/i
+  ];
+}
+
 async function fillFirst(locator, value, label, report) {
   if (!value) return false;
   try {
@@ -143,7 +189,7 @@ async function chooseRadioOrCheckbox(page, labels, label, report) {
   return false;
 }
 
-async function clickApplyIfPresent(page, report) {
+async function clickApplyIfPresent(page, report, platform) {
   const labels = [
     /apply for this job/i,
     /apply now/i,
@@ -151,6 +197,10 @@ async function clickApplyIfPresent(page, report) {
     /start application/i,
     /submit application form/i
   ];
+  if (platform === "linkedin") labels.unshift(/easy apply/i, /apply on company site/i);
+  if (platform === "indeed") labels.unshift(/apply now/i, /apply on company site/i);
+  if (platform === "ashby") labels.unshift(/apply now/i);
+  if (platform === "lever" || platform === "greenhouse") labels.unshift(/apply for this job/i);
   for (const name of labels) {
     try {
       const button = page.getByRole("button", { name }).first();
@@ -452,6 +502,10 @@ async function scanVisibleFields(page) {
   });
 }
 
+function fieldFingerprint(fields) {
+  return fields.map(field => `${field.tag}:${field.type}:${field.name || field.id || ""}:${field.prompt || ""}`).join("|");
+}
+
 function classifyField(field) {
   const text = `${field.prompt || ""} ${field.name || ""} ${field.id || ""} ${field.placeholder || ""}`.toLowerCase();
   if (/(first name|given name)/.test(text)) return "first_name";
@@ -545,15 +599,23 @@ async function fillLocatorFromScan(locator, field, answer, report) {
   return true;
 }
 
-async function fillScannedFields(page, task, report) {
+async function fillScannedFields(page, task, report, stepLabel = "step-1") {
   const fields = await scanVisibleFields(page);
-  report.scanned_fields = fields.map(field => ({
+  const scanned = fields.map(field => ({
     prompt: shortText(field.prompt || field.name || field.id || "", 220),
     type: field.type,
     tag: field.tag,
     required: Boolean(field.required),
+    step: stepLabel,
     options: (field.options || []).slice(0, 8)
   }));
+  report.scanned_fields.push(...scanned);
+  report.step_history.push({
+    step: stepLabel,
+    url: page.url(),
+    field_count: fields.length,
+    required_count: fields.filter(field => field.required).length
+  });
   const allLocators = page.locator("input, textarea, select");
 
   for (const field of fields) {
@@ -587,6 +649,7 @@ async function fillScannedFields(page, task, report) {
       }
     }
   }
+  return fields;
 }
 
 async function isVisible(locator) {
@@ -595,6 +658,22 @@ async function isVisible(locator) {
   } catch (error) {
     return false;
   }
+}
+
+async function preLoginIfConfigured(page, task, report, platform) {
+  const credential = task.site_credential || {};
+  if (!credential.login_url || !credential.password_set) return false;
+  if (!["linkedin", "indeed"].includes(platform)) return false;
+  if (report.login.prelogin_attempted) return false;
+  report.login.prelogin_attempted = true;
+  report.login.status = "prelogin";
+  report.login.login_url = credential.login_url;
+  await page.goto(credential.login_url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  pushUnique(report.visited_urls, page.url());
+  await attemptLoginIfNeeded(page, task, report);
+  await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  pushUnique(report.visited_urls, page.url());
+  return true;
 }
 
 async function attemptLoginIfNeeded(page, task, report) {
@@ -667,6 +746,50 @@ async function attemptLoginIfNeeded(page, task, report) {
   return !stillOnPassword;
 }
 
+async function clickSafeContinue(page, report, platform) {
+  const progressPatterns = stepPatternsForPlatform(platform);
+  const submitPatterns = finalSubmitPatterns();
+  const controls = page.locator('button, input[type="submit"], input[type="button"]');
+  const count = await controls.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    const control = controls.nth(i);
+    try {
+      if (!(await isVisible(control))) continue;
+      const disabled = await control.isDisabled().catch(() => false);
+      if (disabled) continue;
+      const text = shortText(await control.evaluate((node) => {
+        const label = node.innerText || node.textContent || node.value || node.getAttribute("aria-label") || "";
+        return String(label || "").replace(/\s+/g, " ").trim();
+      }).catch(() => ""));
+      if (!text) continue;
+      if (submitPatterns.some(pattern => pattern.test(text))) continue;
+      if (!progressPatterns.some(pattern => pattern.test(text))) continue;
+      await control.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+      await control.click({ timeout: 5000 });
+      await page.waitForLoadState("domcontentloaded", { timeout: 12000 }).catch(() => {});
+      await page.waitForTimeout(1200);
+      pushUnique(report.visited_urls, page.url());
+      report.step_history.push({
+        step: `advance:${report.step_history.length + 1}`,
+        url: page.url(),
+        action: text
+      });
+      return text;
+    } catch (error) {
+      // Continue.
+    }
+  }
+  return "";
+}
+
+async function fillCurrentStep(page, task, report, stepLabel) {
+  await fillProfileFields(page, task, report);
+  await uploadCv(page, task, report);
+  await fillTextAreas(page, task, report);
+  await answerCommonScreening(page, task, report);
+  return fillScannedFields(page, task, report, stepLabel);
+}
+
 async function saveArtifacts(page, task, report) {
   report.last_url = page.url();
   report.finished_at = new Date().toISOString();
@@ -701,11 +824,13 @@ async function main() {
   const report = {
     created_at: task.created_at || new Date().toISOString(),
     task_path: taskPath,
+    platform: inferPlatform(task),
     status: "started",
     clicked_apply: false,
     visited_urls: [],
     login: { status: "not-attempted" },
     scanned_fields: [],
+    step_history: [],
     filled_fields: [],
     skipped_fields: [],
     review_fields: [],
@@ -724,17 +849,24 @@ async function main() {
   page.setDefaultTimeout(7000);
 
   try {
+    const platform = inferPlatform(task, task.job.url);
     console.log(`opening ${task.job.url}`);
+    await preLoginIfConfigured(page, task, report, platform);
     await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
     pushUnique(report.visited_urls, page.url());
     await attemptLoginIfNeeded(page, task, report);
-    await clickApplyIfPresent(page, report);
+    await clickApplyIfPresent(page, report, platform);
     await attemptLoginIfNeeded(page, task, report);
-    await fillProfileFields(page, task, report);
-    await uploadCv(page, task, report);
-    await fillTextAreas(page, task, report);
-    await answerCommonScreening(page, task, report);
-    await fillScannedFields(page, task, report);
+    let lastFingerprint = "";
+    for (let step = 1; step <= 4; step += 1) {
+      const fields = await fillCurrentStep(page, task, report, `step-${step}`);
+      const fingerprint = fieldFingerprint(fields);
+      if (fingerprint && fingerprint === lastFingerprint) break;
+      lastFingerprint = fingerprint;
+      const advancedWith = await clickSafeContinue(page, report, platform);
+      if (!advancedWith) break;
+      await attemptLoginIfNeeded(page, task, report);
+    }
     await addReviewBanner(page, task).catch(() => {});
     await saveArtifacts(page, task, report);
     console.log("Form preparation complete. Review manually and submit yourself. Close the browser when done.");
