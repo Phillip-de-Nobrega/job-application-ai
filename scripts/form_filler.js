@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { execFileSync } = require("child_process");
 const { chromium } = require("playwright");
 
 function argValue(flag) {
@@ -17,7 +18,52 @@ function splitName(fullName) {
   return { first: parts[0], last: parts.slice(1).join(" ") };
 }
 
-async function fillFirst(locator, value, label) {
+function shortText(value, limit = 160) {
+  const clean = String(value || "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return clean.length > limit ? `${clean.slice(0, limit - 1)}...` : clean;
+}
+
+function ensureDir(filePath) {
+  if (!filePath) return;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
+function pushUnique(list, value) {
+  if (value && !list.includes(value)) list.push(value);
+}
+
+function record(list, item) {
+  list.push({
+    prompt: shortText(item.prompt || item.label || item.name || item.reason || "Unnamed field", 220),
+    category: item.category || "",
+    kind: item.kind || "",
+    value_preview: shortText(item.value_preview || item.value || item.choice || "", 140),
+    reason: shortText(item.reason || "", 220)
+  });
+}
+
+function readKeychainPassword(credential) {
+  if (!credential || !credential.keychain_service || !credential.username) return "";
+  try {
+    return execFileSync(
+      "security",
+      [
+        "find-generic-password",
+        "-a",
+        String(credential.username),
+        "-s",
+        String(credential.keychain_service),
+        "-w"
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+    ).trim();
+  } catch (error) {
+    return "";
+  }
+}
+
+async function fillFirst(locator, value, label, report) {
   if (!value) return false;
   try {
     const count = await locator.count();
@@ -25,6 +71,7 @@ async function fillFirst(locator, value, label) {
     const target = locator.first();
     await target.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
     await target.fill(String(value), { timeout: 5000 });
+    record(report.filled_fields, { prompt: label, value, kind: "heuristic" });
     console.log(`filled ${label}`);
     return true;
   } catch (error) {
@@ -32,28 +79,28 @@ async function fillFirst(locator, value, label) {
   }
 }
 
-async function fillByLabels(page, labels, value, label) {
+async function fillByLabels(page, labels, value, label, report) {
   for (const text of labels) {
-    if (await fillFirst(page.getByLabel(new RegExp(text, "i")), value, label)) return true;
+    if (await fillFirst(page.getByLabel(new RegExp(text, "i")), value, label, report)) return true;
   }
   return false;
 }
 
-async function fillByPlaceholders(page, placeholders, value, label) {
+async function fillByPlaceholders(page, placeholders, value, label, report) {
   for (const text of placeholders) {
-    if (await fillFirst(page.getByPlaceholder(new RegExp(text, "i")), value, label)) return true;
+    if (await fillFirst(page.getByPlaceholder(new RegExp(text, "i")), value, label, report)) return true;
   }
   return false;
 }
 
-async function fillBySelectors(page, selectors, value, label) {
+async function fillBySelectors(page, selectors, value, label, report) {
   for (const selector of selectors) {
-    if (await fillFirst(page.locator(selector), value, label)) return true;
+    if (await fillFirst(page.locator(selector), value, label, report)) return true;
   }
   return false;
 }
 
-async function selectFirstMatchingOption(page, selectors, wanted, label) {
+async function selectFirstMatchingOption(page, selectors, wanted, label, report) {
   if (!wanted) return false;
   const wantedLower = String(wanted).toLowerCase();
   for (const selector of selectors) {
@@ -68,6 +115,7 @@ async function selectFirstMatchingOption(page, selectors, wanted, label) {
         || options.find(option => option.value.toLowerCase().includes(wantedLower));
       if (match) {
         await select.selectOption(match.value || { label: match.text }, { timeout: 5000 });
+        record(report.filled_fields, { prompt: label, value: match.text || match.value, kind: "select" });
         console.log(`selected ${label}`);
         return true;
       }
@@ -78,12 +126,13 @@ async function selectFirstMatchingOption(page, selectors, wanted, label) {
   return false;
 }
 
-async function chooseRadioOrCheckbox(page, labels, label) {
+async function chooseRadioOrCheckbox(page, labels, label, report) {
   for (const text of labels) {
     try {
       const control = page.getByLabel(new RegExp(text, "i")).first();
       if (await control.count()) {
         await control.check({ timeout: 5000 });
+        record(report.filled_fields, { prompt: label, value: text, kind: "choice" });
         console.log(`selected ${label}`);
         return true;
       }
@@ -94,7 +143,7 @@ async function chooseRadioOrCheckbox(page, labels, label) {
   return false;
 }
 
-async function clickApplyIfPresent(page) {
+async function clickApplyIfPresent(page, report) {
   const labels = [
     /apply for this job/i,
     /apply now/i,
@@ -109,11 +158,13 @@ async function clickApplyIfPresent(page) {
         await button.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
         await button.click({ timeout: 5000 });
         await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+        report.clicked_apply = true;
+        pushUnique(report.visited_urls, page.url());
         console.log("clicked apply/start button");
-        return;
+        return true;
       }
     } catch (error) {
-      // Continue; many sites render non-button links or hidden buttons.
+      // Continue.
     }
     try {
       const link = page.getByRole("link", { name }).first();
@@ -121,31 +172,34 @@ async function clickApplyIfPresent(page) {
         await link.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
         await link.click({ timeout: 5000 });
         await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+        report.clicked_apply = true;
+        pushUnique(report.visited_urls, page.url());
         console.log("clicked apply/start link");
-        return;
+        return true;
       }
     } catch (error) {
       // Continue.
     }
   }
+  return false;
 }
 
-async function fillProfileFields(page, task) {
+async function fillProfileFields(page, task, report) {
   const profile = task.profile || {};
   const name = splitName(profile.full_name);
 
-  await fillByLabels(page, ["first name", "given name"], name.first, "first name");
-  await fillByLabels(page, ["last name", "surname", "family name"], name.last, "last name");
-  await fillByLabels(page, ["full name", "^name$"], profile.full_name, "full name");
-  await fillByLabels(page, ["email", "e-mail"], profile.email, "email");
-  await fillByLabels(page, ["phone", "mobile", "telephone"], profile.phone, "phone");
-  await fillByLabels(page, ["location", "city", "current location"], profile.location, "location");
-  await fillByLabels(page, ["linkedin", "linked in"], profile.linkedin_url, "linkedin");
-  await fillByLabels(page, ["portfolio", "website"], profile.portfolio_url || profile.linkedin_url, "portfolio/website");
+  await fillByLabels(page, ["first name", "given name"], name.first, "first name", report);
+  await fillByLabels(page, ["last name", "surname", "family name"], name.last, "last name", report);
+  await fillByLabels(page, ["full name", "^name$"], profile.full_name, "full name", report);
+  await fillByLabels(page, ["email", "e-mail"], profile.email, "email", report);
+  await fillByLabels(page, ["phone", "mobile", "telephone"], profile.phone, "phone", report);
+  await fillByLabels(page, ["location", "city", "current location"], profile.location, "location", report);
+  await fillByLabels(page, ["linkedin", "linked in"], profile.linkedin_url, "linkedin", report);
+  await fillByLabels(page, ["portfolio", "website"], profile.portfolio_url || profile.linkedin_url, "portfolio/website", report);
 
-  await fillByPlaceholders(page, ["email", "e-mail"], profile.email, "email placeholder");
-  await fillByPlaceholders(page, ["phone", "mobile"], profile.phone, "phone placeholder");
-  await fillByPlaceholders(page, ["linkedin"], profile.linkedin_url, "linkedin placeholder");
+  await fillByPlaceholders(page, ["email", "e-mail"], profile.email, "email placeholder", report);
+  await fillByPlaceholders(page, ["phone", "mobile"], profile.phone, "phone placeholder", report);
+  await fillByPlaceholders(page, ["linkedin"], profile.linkedin_url, "linkedin placeholder", report);
 
   await fillBySelectors(page, [
     'input[name="first_name"]',
@@ -153,8 +207,8 @@ async function fillProfileFields(page, task) {
     'input[name="candidate[first_name]"]',
     'input[name="job_application[first_name]"]',
     'input[name*="first" i]',
-    'input[id*="first" i]',
-  ], name.first, "first name selector");
+    'input[id*="first" i]'
+  ], name.first, "first name selector", report);
   await fillBySelectors(page, [
     'input[name="last_name"]',
     'input[id="last_name"]',
@@ -162,14 +216,14 @@ async function fillProfileFields(page, task) {
     'input[name="job_application[last_name]"]',
     'input[name*="last" i]',
     'input[id*="last" i]',
-    'input[name*="surname" i]',
-  ], name.last, "last name selector");
+    'input[name*="surname" i]'
+  ], name.last, "last name selector", report);
   await fillBySelectors(page, [
     'input[name="name"]',
     'input[id="name"]',
     'input[name="candidate[name]"]',
-    'input[name="job_application[name]"]',
-  ], profile.full_name, "full name selector");
+    'input[name="job_application[name]"]'
+  ], profile.full_name, "full name selector", report);
   await fillBySelectors(page, [
     'input[name="email"]',
     'input[id="email"]',
@@ -177,8 +231,8 @@ async function fillProfileFields(page, task) {
     'input[name="job_application[email]"]',
     'input[type="email"]',
     'input[name*="email" i]',
-    'input[id*="email" i]',
-  ], profile.email, "email selector");
+    'input[id*="email" i]'
+  ], profile.email, "email selector", report);
   await fillBySelectors(page, [
     'input[name="phone"]',
     'input[id="phone"]',
@@ -187,53 +241,67 @@ async function fillProfileFields(page, task) {
     'input[type="tel"]',
     'input[name*="phone" i]',
     'input[id*="phone" i]',
-    'input[name*="mobile" i]',
-  ], profile.phone, "phone selector");
+    'input[name*="mobile" i]'
+  ], profile.phone, "phone selector", report);
   await fillBySelectors(page, [
     'input[name*="linkedin" i]',
     'input[id*="linkedin" i]',
     'input[name*="urls" i]',
-    'input[id*="urls" i]',
-  ], profile.linkedin_url, "linkedin selector");
+    'input[id*="urls" i]'
+  ], profile.linkedin_url, "linkedin selector", report);
   await selectFirstMatchingOption(page, [
     'select[name*="location" i]',
     'select[id*="location" i]',
     'select[name*="country" i]',
-    'select[id*="country" i]',
-  ], "South Africa", "country/location");
+    'select[id*="country" i]'
+  ], "South Africa", "country/location", report);
 }
 
-async function fillTextAreas(page, task) {
+function motivationText(task) {
+  const app = task.application || {};
+  const job = task.job || {};
+  const parts = [
+    app.company_notes,
+    app.research_notes,
+    app.answers,
+    app.cover_letter,
+    `${job.title || ""} at ${job.company || ""}`
+  ].filter(Boolean);
+  return shortText(parts.join("\n\n"), 900);
+}
+
+async function fillTextAreas(page, task, report) {
   const app = task.application || {};
   const profile = task.profile || {};
   const answers = app.answers || "";
   const coverLetter = app.cover_letter || "";
+  const whyRole = motivationText(task);
 
-  await fillByLabels(page, ["cover letter", "cover note", "message to hiring", "additional information"], coverLetter, "cover letter");
-  await fillByLabels(page, ["why.*interested", "why.*role", "why.*company", "why do you want"], answers, "questionnaire answers");
-  await fillByLabels(page, ["salary", "compensation"], profile.salary_expectation, "salary expectation");
-  await fillByLabels(page, ["notice", "availability", "start date"], profile.availability || profile.notice_period, "availability");
+  await fillByLabels(page, ["cover letter", "cover note", "message to hiring", "additional information"], coverLetter, "cover letter", report);
+  await fillByLabels(page, ["why.*interested", "why.*role", "why.*company", "why do you want"], whyRole || answers, "questionnaire answers", report);
+  await fillByLabels(page, ["salary", "compensation"], profile.salary_expectation, "salary expectation", report);
+  await fillByLabels(page, ["notice", "availability", "start date"], profile.availability || profile.notice_period, "availability", report);
   await fillBySelectors(page, [
     'textarea[name*="cover" i]',
     'textarea[id*="cover" i]',
     'textarea[name*="comments" i]',
     'textarea[id*="comments" i]',
-    'textarea[name*="message" i]',
-  ], coverLetter, "cover letter selector");
+    'textarea[name*="message" i]'
+  ], coverLetter, "cover letter selector", report);
   await fillBySelectors(page, [
     'input[name*="salary" i]',
     'input[id*="salary" i]',
     'input[name*="compensation" i]',
-    'input[id*="compensation" i]',
-  ], profile.salary_expectation, "salary selector");
+    'input[id*="compensation" i]'
+  ], profile.salary_expectation, "salary selector", report);
   await fillBySelectors(page, [
     'input[name*="available" i]',
     'input[id*="available" i]',
     'input[name*="start" i]',
     'input[id*="start" i]',
     'input[name*="notice" i]',
-    'input[id*="notice" i]',
-  ], profile.availability || profile.notice_period, "availability selector");
+    'input[id*="notice" i]'
+  ], profile.availability || profile.notice_period, "availability selector", report);
 
   const textareas = page.locator("textarea");
   const count = await textareas.count().catch(() => 0);
@@ -245,10 +313,11 @@ async function fillTextAreas(page, task) {
       const meta = `${await area.getAttribute("name").catch(() => "")} ${await area.getAttribute("id").catch(() => "")} ${await area.getAttribute("placeholder").catch(() => "")}`.toLowerCase();
       if (meta.includes("cover")) {
         await area.fill(coverLetter, { timeout: 5000 });
-        console.log("filled textarea cover letter");
+        record(report.filled_fields, { prompt: "textarea cover letter", value: coverLetter, kind: "textarea" });
       } else if (meta.includes("why") || meta.includes("question") || meta.includes("additional")) {
-        await area.fill(answers || coverLetter, { timeout: 5000 });
-        console.log("filled textarea answers");
+        const valueToUse = whyRole || answers || coverLetter;
+        await area.fill(valueToUse, { timeout: 5000 });
+        record(report.filled_fields, { prompt: "textarea answers", value: valueToUse, kind: "textarea" });
       }
     } catch (error) {
       // Leave ambiguous textareas untouched.
@@ -256,17 +325,17 @@ async function fillTextAreas(page, task) {
   }
 }
 
-async function answerCommonScreening(page, task) {
+async function answerCommonScreening(page, task, report) {
   const profile = task.profile || {};
-  await chooseRadioOrCheckbox(page, ["prefer not", "decline to self", "i do not wish"], "prefer not to answer");
-  await fillByLabels(page, ["work authorization", "right to work", "visa"], profile.work_authorization, "work authorization");
-  await fillByLabels(page, ["salary expectation", "expected salary", "compensation"], profile.salary_expectation, "salary expectation");
+  await chooseRadioOrCheckbox(page, ["prefer not", "decline to self", "i do not wish"], "prefer not to answer", report);
+  await fillByLabels(page, ["work authorization", "right to work", "visa"], profile.work_authorization, "work authorization", report);
+  await fillByLabels(page, ["salary expectation", "expected salary", "compensation"], profile.salary_expectation, "salary expectation", report);
 }
 
-async function uploadCv(page, task) {
+async function uploadCv(page, task, report) {
   const cvPath = task.profile && task.profile.cv_path;
   if (!cvPath || !fs.existsSync(cvPath)) {
-    console.log("cv path missing or not found; skipped upload");
+    record(report.skipped_fields, { prompt: "CV upload", reason: "CV path missing or not found." });
     return;
   }
 
@@ -283,18 +352,21 @@ async function uploadCv(page, task) {
       ].join(" ").toLowerCase();
       if (i === 0 || meta.includes("resume") || meta.includes("cv") || meta.includes("upload")) {
         await input.setInputFiles(cvPath, { timeout: 8000 });
+        record(report.filled_fields, { prompt: "CV upload", value: path.basename(cvPath), kind: "file" });
         console.log("uploaded CV to file input");
         return;
       }
     } catch (error) {
-      console.log(`file input skipped: ${error.message}`);
+      record(report.skipped_fields, { prompt: "CV upload", reason: error.message });
     }
   }
-  console.log("no file input found for CV upload");
+  record(report.skipped_fields, { prompt: "CV upload", reason: "No file input found." });
 }
 
 async function addReviewBanner(page, task) {
   await page.evaluate((data) => {
+    const existing = document.getElementById("job-application-ai-review-banner");
+    if (existing) existing.remove();
     const banner = document.createElement("div");
     banner.id = "job-application-ai-review-banner";
     banner.textContent = `Job Application AI filled what it could for ${data.title || "this role"}. Review every field manually. The assistant will not click submit.`;
@@ -317,6 +389,304 @@ async function addReviewBanner(page, task) {
   }, { title: task.job && task.job.title });
 }
 
+async function scanVisibleFields(page) {
+  return page.locator("input, textarea, select").evaluateAll((nodes) => {
+    function clean(value) {
+      return String(value || "").replace(/\s+/g, " ").trim();
+    }
+    function isVisible(node) {
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.visibility !== "hidden"
+        && style.display !== "none"
+        && Number(style.opacity || "1") !== 0
+        && rect.width > 0
+        && rect.height > 0;
+    }
+    function labelFor(node) {
+      const parts = [];
+      const id = node.id;
+      if (id) {
+        document.querySelectorAll(`label[for="${CSS.escape(id)}"]`).forEach(label => parts.push(clean(label.textContent)));
+      }
+      const closestLabel = node.closest("label");
+      if (closestLabel) parts.push(clean(closestLabel.textContent));
+      const fieldset = node.closest("fieldset");
+      const legend = fieldset ? clean(fieldset.querySelector("legend")?.textContent || "") : "";
+      if (legend) parts.push(legend);
+      const parentText = clean(node.parentElement?.textContent || "");
+      if (parentText && parentText.length < 180) parts.push(parentText);
+      const section = clean(node.closest("section, form, div")?.querySelector("h1, h2, h3, h4")?.textContent || "");
+      if (section) parts.push(section);
+      parts.push(clean(node.getAttribute("aria-label")));
+      parts.push(clean(node.getAttribute("placeholder")));
+      return clean(parts.filter(Boolean).join(" | "));
+    }
+    return nodes.map((node, index) => {
+      const tag = node.tagName.toLowerCase();
+      const type = tag === "input" ? (node.getAttribute("type") || "text").toLowerCase() : tag;
+      const prompt = labelFor(node);
+      const options = tag === "select"
+        ? Array.from(node.querySelectorAll("option")).map(option => clean(option.textContent || option.value)).filter(Boolean)
+        : [];
+      const currentValue = tag === "select"
+        ? clean(node.options[node.selectedIndex]?.textContent || node.value || "")
+        : type === "checkbox" || type === "radio"
+          ? (node.checked ? "checked" : "")
+          : clean(node.value || "");
+      return {
+        index,
+        tag,
+        type,
+        name: clean(node.getAttribute("name")),
+        id: clean(node.id),
+        prompt,
+        placeholder: clean(node.getAttribute("placeholder")),
+        required: node.required || clean(node.getAttribute("aria-required")) === "true",
+        disabled: node.disabled,
+        visible: isVisible(node),
+        currentValue,
+        options
+      };
+    }).filter(item => item.visible && !item.disabled && item.type !== "hidden");
+  });
+}
+
+function classifyField(field) {
+  const text = `${field.prompt || ""} ${field.name || ""} ${field.id || ""} ${field.placeholder || ""}`.toLowerCase();
+  if (/(first name|given name)/.test(text)) return "first_name";
+  if (/(last name|surname|family name)/.test(text)) return "last_name";
+  if (/(full name|^name$|candidate name)/.test(text)) return "full_name";
+  if (/(email|e-mail)/.test(text)) return "email";
+  if (/(phone|mobile|telephone|cell)/.test(text)) return "phone";
+  if (/linkedin/.test(text)) return "linkedin";
+  if (/(portfolio|website|personal site)/.test(text)) return "website";
+  if (/(current location|location|city|town|where are you based)/.test(text)) return "location";
+  if (/country/.test(text)) return "country";
+  if (/(cover letter|cover note|message to hiring|additional information)/.test(text)) return "cover_letter";
+  if (/(why.*(role|company|interested)|motivation|why do you want|why would you like)/.test(text)) return "motivation";
+  if (/(salary|compensation|pay expectation|rate)/.test(text)) return "salary";
+  if (/(availability|start date|notice period|when can you start)/.test(text)) return "availability";
+  if (/(work authorization|right to work|visa|sponsorship|authorized to work)/.test(text)) return "work_authorization";
+  if (/reference/.test(text)) return "references";
+  if (/(gender|ethnicity|race|disability|veteran|demographic|sexual orientation)/.test(text)) return "demographics";
+  if (/(resume|cv|curriculum vitae)/.test(text)) return "cv_upload";
+  return "";
+}
+
+function answerForCategory(category, field, task) {
+  const profile = task.profile || {};
+  const app = task.application || {};
+  const name = splitName(profile.full_name);
+  if (category === "first_name") return { value: name.first };
+  if (category === "last_name") return { value: name.last };
+  if (category === "full_name") return { value: profile.full_name };
+  if (category === "email") return { value: profile.email };
+  if (category === "phone") return { value: profile.phone };
+  if (category === "linkedin") return { value: profile.linkedin_url };
+  if (category === "website") return { value: profile.portfolio_url || profile.linkedin_url };
+  if (category === "location") return { value: profile.location };
+  if (category === "country") return { value: "South Africa", choice: "South Africa" };
+  if (category === "cover_letter") return { value: app.cover_letter };
+  if (category === "motivation") return { value: motivationText(task) };
+  if (category === "salary") return { value: profile.salary_expectation };
+  if (category === "availability") return { value: profile.availability || profile.notice_period };
+  if (category === "references") return { value: profile.references_policy || "Available on request." };
+  if (category === "demographics") return { choice: "Prefer not to answer" };
+  if (category === "work_authorization") {
+    const prompt = `${field.prompt || ""} ${field.name || ""}`.toLowerCase();
+    const jobText = `${task.job?.location || ""} ${task.job?.description || ""}`.toLowerCase();
+    const sponsorship = /sponsorship|require sponsorship|need sponsorship/.test(prompt);
+    const southAfrica = /south africa/.test(prompt) || /south africa|cape town/.test(jobText);
+    const unitedKingdom = /\buk\b|united kingdom|britain/.test(prompt) || /\buk\b|united kingdom|london/.test(jobText);
+    if (sponsorship && (southAfrica || unitedKingdom)) return { choice: "No", review: true, reason: "Check sponsorship wording before submit." };
+    if (!sponsorship && (southAfrica || unitedKingdom)) return { choice: "Yes", value: profile.work_authorization, review: true, reason: "Check right-to-work wording before submit." };
+    return { value: profile.work_authorization, review: true, reason: "Legal/work authorization wording needs manual review." };
+  }
+  return { value: "" };
+}
+
+async function fillLocatorFromScan(locator, field, answer, report) {
+  const choice = answer.choice || answer.value || "";
+  if (!choice) return false;
+  const prompt = field.prompt || field.name || field.id || "field";
+  if (field.tag === "select") {
+    const options = await locator.locator("option").evaluateAll(nodes => nodes.map(node => ({
+      value: node.value || "",
+      text: (node.textContent || "").trim()
+    }))).catch(() => []);
+    const wanted = String(choice).toLowerCase();
+    const match = options.find(option => option.text.toLowerCase() === wanted)
+      || options.find(option => option.text.toLowerCase().includes(wanted))
+      || options.find(option => option.value.toLowerCase().includes(wanted));
+    if (!match) return false;
+    await locator.selectOption(match.value || { label: match.text }, { timeout: 5000 });
+    record(report.filled_fields, { prompt, value: match.text || match.value, category: answer.category, kind: "select" });
+    return true;
+  }
+  if (field.type === "checkbox" || field.type === "radio") {
+    const wanted = String(choice).toLowerCase();
+    const promptText = `${field.prompt || ""} ${field.name || ""}`.toLowerCase();
+    if ((wanted.includes("prefer not") && promptText.includes("prefer not")) || (wanted === "yes" && promptText.includes("yes")) || (wanted === "no" && promptText.includes("no"))) {
+      await locator.check({ timeout: 5000 });
+      record(report.filled_fields, { prompt, value: choice, category: answer.category, kind: field.type });
+      return true;
+    }
+    return false;
+  }
+  if (field.type === "date" && /^\d{4}-\d{2}-\d{2}$/.test(String(answer.value || ""))) {
+    await locator.fill(String(answer.value), { timeout: 5000 });
+    record(report.filled_fields, { prompt, value: answer.value, category: answer.category, kind: "date" });
+    return true;
+  }
+  if (!String(answer.value || "").trim()) return false;
+  await locator.fill(String(answer.value), { timeout: 5000 });
+  record(report.filled_fields, { prompt, value: answer.value, category: answer.category, kind: field.tag });
+  return true;
+}
+
+async function fillScannedFields(page, task, report) {
+  const fields = await scanVisibleFields(page);
+  report.scanned_fields = fields.map(field => ({
+    prompt: shortText(field.prompt || field.name || field.id || "", 220),
+    type: field.type,
+    tag: field.tag,
+    required: Boolean(field.required),
+    options: (field.options || []).slice(0, 8)
+  }));
+  const allLocators = page.locator("input, textarea, select");
+
+  for (const field of fields) {
+    const prompt = field.prompt || field.name || field.id || "Unnamed field";
+    const category = classifyField(field);
+    if (!category || category === "cv_upload") continue;
+    if (field.currentValue) continue;
+    const locator = allLocators.nth(field.index);
+    const answer = answerForCategory(category, field, task);
+    answer.category = category;
+    try {
+      const filled = await fillLocatorFromScan(locator, field, answer, report);
+      if (filled) {
+        if (answer.review) {
+          record(report.review_fields, { prompt, category, value: answer.choice || answer.value, reason: answer.reason || "Review this answer before submit." });
+        }
+      } else if (field.required) {
+        record(report.review_fields, {
+          prompt,
+          category,
+          reason: answer.reason || `Could not safely fill this required ${category.replace(/_/g, " ")} field.`
+        });
+      } else {
+        record(report.skipped_fields, { prompt, category, reason: "No safe automatic answer." });
+      }
+    } catch (error) {
+      if (field.required) {
+        record(report.review_fields, { prompt, category, reason: error.message });
+      } else {
+        record(report.skipped_fields, { prompt, category, reason: error.message });
+      }
+    }
+  }
+}
+
+async function isVisible(locator) {
+  try {
+    return await locator.isVisible({ timeout: 1500 });
+  } catch (error) {
+    return false;
+  }
+}
+
+async function attemptLoginIfNeeded(page, task, report) {
+  const credential = task.site_credential || {};
+  const passwordField = page.locator('input[type="password"]').first();
+  if (!(await isVisible(passwordField))) {
+    if (!credential.password_set) report.login = { status: "session-only", username: credential.username || "" };
+    return false;
+  }
+  const password = readKeychainPassword(credential);
+  if (!password) {
+    report.login = {
+      status: credential.username ? "password-missing" : "no-credentials",
+      username: credential.username || "",
+      login_url: page.url()
+    };
+    record(report.review_fields, { prompt: "Login", reason: "Password field is visible but no Keychain password is saved for this site." });
+    return false;
+  }
+
+  report.login = { status: "attempted", username: credential.username || "", login_url: page.url() };
+  const username = credential.username || task.profile?.email || "";
+  await fillByLabels(page, ["email", "username", "login"], username, "login username", report);
+  await fillByPlaceholders(page, ["email", "username"], username, "login username placeholder", report);
+  await fillBySelectors(page, [
+    'input[type="email"]',
+    'input[name*="email" i]',
+    'input[id*="email" i]',
+    'input[name*="user" i]',
+    'input[id*="user" i]',
+    'input[name*="login" i]'
+  ], username, "login username selector", report);
+  await passwordField.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await passwordField.fill(password, { timeout: 5000 });
+  record(report.filled_fields, { prompt: "login password", value: "[saved in Keychain]", kind: "login" });
+
+  const buttons = [
+    /sign in/i,
+    /log in/i,
+    /continue/i,
+    /next/i,
+    /submit/i
+  ];
+  let clicked = false;
+  for (const name of buttons) {
+    try {
+      const button = page.getByRole("button", { name }).first();
+      if (await button.count()) {
+        await button.click({ timeout: 5000 });
+        clicked = true;
+        break;
+      }
+    } catch (error) {
+      // Continue.
+    }
+  }
+  if (!clicked) {
+    await passwordField.press("Enter").catch(() => {});
+  }
+
+  await page.waitForLoadState("domcontentloaded", { timeout: 12000 }).catch(() => {});
+  await page.waitForTimeout(2000);
+  pushUnique(report.visited_urls, page.url());
+  const stillOnPassword = await isVisible(passwordField);
+  report.login.status = stillOnPassword ? "needs-review" : "success";
+  report.login.result_url = page.url();
+  if (stillOnPassword) {
+    record(report.review_fields, { prompt: "Login", reason: "Password field is still visible. MFA, CAPTCHA, or manual review may be required." });
+  }
+  return !stillOnPassword;
+}
+
+async function saveArtifacts(page, task, report) {
+  report.last_url = page.url();
+  report.finished_at = new Date().toISOString();
+  report.status = report.errors.length
+    ? "needs-review"
+    : report.review_fields.length
+      ? "review-required"
+      : "ready-for-review";
+  if (task.screenshot_path) {
+    ensureDir(task.screenshot_path);
+    await page.screenshot({ path: task.screenshot_path, fullPage: true }).catch((error) => {
+      report.errors.push(`Screenshot failed: ${error.message}`);
+    });
+  }
+  if (task.report_path) {
+    ensureDir(task.report_path);
+    fs.writeFileSync(task.report_path, JSON.stringify(report, null, 2), "utf8");
+  }
+}
+
 async function main() {
   const taskPath = argValue("--task");
   if (!taskPath) {
@@ -327,6 +697,20 @@ async function main() {
   if (!task.job || !task.job.url) {
     throw new Error("Task is missing job.url");
   }
+
+  const report = {
+    created_at: task.created_at || new Date().toISOString(),
+    task_path: taskPath,
+    status: "started",
+    clicked_apply: false,
+    visited_urls: [],
+    login: { status: "not-attempted" },
+    scanned_fields: [],
+    filled_fields: [],
+    skipped_fields: [],
+    review_fields: [],
+    errors: []
+  };
 
   const userDataDir = path.join(path.dirname(path.dirname(taskPath)), "playwright-profile");
   fs.mkdirSync(userDataDir, { recursive: true });
@@ -339,17 +723,27 @@ async function main() {
   const page = context.pages()[0] || await context.newPage();
   page.setDefaultTimeout(7000);
 
-  console.log(`opening ${task.job.url}`);
-  await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await clickApplyIfPresent(page);
-  await fillProfileFields(page, task);
-  await uploadCv(page, task);
-  await fillTextAreas(page, task);
-  await answerCommonScreening(page, task);
-  await addReviewBanner(page, task).catch(() => {});
-
-  console.log("Form preparation complete. Review manually and submit yourself. Close the browser when done.");
-  await page.waitForTimeout(24 * 60 * 60 * 1000);
+  try {
+    console.log(`opening ${task.job.url}`);
+    await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    pushUnique(report.visited_urls, page.url());
+    await attemptLoginIfNeeded(page, task, report);
+    await clickApplyIfPresent(page, report);
+    await attemptLoginIfNeeded(page, task, report);
+    await fillProfileFields(page, task, report);
+    await uploadCv(page, task, report);
+    await fillTextAreas(page, task, report);
+    await answerCommonScreening(page, task, report);
+    await fillScannedFields(page, task, report);
+    await addReviewBanner(page, task).catch(() => {});
+    await saveArtifacts(page, task, report);
+    console.log("Form preparation complete. Review manually and submit yourself. Close the browser when done.");
+    await page.waitForTimeout(24 * 60 * 60 * 1000);
+  } catch (error) {
+    report.errors.push(error.stack || error.message);
+    await saveArtifacts(page, task, report).catch(() => {});
+    throw error;
+  }
 }
 
 main().catch((error) => {

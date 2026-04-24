@@ -45,6 +45,7 @@ DOCS_DIR = ROOT / "documents"
 TASK_DIR = DATA_DIR / "form_tasks"
 LOG_DIR = DATA_DIR / "logs"
 SMOKE_DIR = DATA_DIR / "smoke"
+FORM_PREP_DIR = DATA_DIR / "form_prep"
 REMINDERS_DIR = DATA_DIR / "reminders"
 NOTIFIED_REMINDERS_PATH = REMINDERS_DIR / "notified-reminders.json"
 DB_PATH = DATA_DIR / "job_application_ai.sqlite3"
@@ -794,6 +795,7 @@ def connect() -> sqlite3.Connection:
     TASK_DIR.mkdir(exist_ok=True)
     LOG_DIR.mkdir(exist_ok=True)
     SMOKE_DIR.mkdir(exist_ok=True)
+    FORM_PREP_DIR.mkdir(exist_ok=True)
     REMINDERS_DIR.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -859,6 +861,9 @@ def init_db() -> None:
                 follow_up text not null default '',
                 next_follow_up text not null default '',
                 follow_up_sent_at text not null default '',
+                form_prep_report_path text not null default '',
+                form_prep_screenshot_path text not null default '',
+                form_prep_started_at text not null default '',
                 created_at text not null,
                 updated_at text not null
             );
@@ -982,6 +987,19 @@ def init_db() -> None:
             );
 
             create unique index if not exists idx_inbox_messages_uid on inbox_messages(message_uid) where message_uid != '';
+
+            create table if not exists site_credentials (
+                id integer primary key autoincrement,
+                domain text not null default '',
+                login_url text not null default '',
+                username text not null default '',
+                notes text not null default '',
+                enabled integer not null default 1,
+                created_at text not null,
+                updated_at text not null
+            );
+
+            create unique index if not exists idx_site_credentials_domain on site_credentials(domain);
             """
         )
         for key, value in DEFAULT_PROFILE.items():
@@ -1002,6 +1020,9 @@ def init_db() -> None:
         ensure_column(conn, "applications", "checklist", "text not null default ''")
         ensure_column(conn, "applications", "truthfulness_flags", "text not null default ''")
         ensure_column(conn, "applications", "recommended_cv_version", "text not null default ''")
+        ensure_column(conn, "applications", "form_prep_report_path", "text not null default ''")
+        ensure_column(conn, "applications", "form_prep_screenshot_path", "text not null default ''")
+        ensure_column(conn, "applications", "form_prep_started_at", "text not null default ''")
         ensure_column(conn, "jobs", "too_senior", "integer not null default 0")
         seed_default_cv_versions(conn)
         seed_default_answer_bank(conn)
@@ -4330,6 +4351,253 @@ def company_from_url(value: str) -> str:
     return host.split(".")[0].replace("-", " ").title()
 
 
+def normalize_domain(value: str) -> str:
+    raw = normalize_space(value).lower()
+    if not raw:
+        return ""
+    parsed = urllib.parse.urlparse(raw if "://" in raw else f"https://{raw}")
+    host = (parsed.netloc or parsed.path or "").strip().lower()
+    if "@" in host:
+        host = host.split("@", 1)[-1]
+    host = host.removeprefix("www.").strip("/")
+    host = host.split(":", 1)[0]
+    return host
+
+
+def domain_variants_for_url(url: str) -> list[str]:
+    host = normalize_domain(url)
+    if not host:
+        return []
+    parts = host.split(".")
+    variants = [host]
+    generic_roots = {"co", "com", "org", "net", "ac", "gov"}
+    for index in range(1, len(parts) - 1):
+        candidate = ".".join(parts[index:])
+        candidate_parts = candidate.split(".")
+        if len(candidate_parts) < 2:
+            continue
+        if len(candidate_parts) == 2 and candidate_parts[0] in generic_roots:
+            continue
+        variants.append(candidate)
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in variants:
+        if item and item not in seen:
+            seen.add(item)
+            unique.append(item)
+    return unique
+
+
+def keychain_service_name(domain: str) -> str:
+    normalized = normalize_domain(domain)
+    if not normalized:
+        raise RuntimeError("A site credential domain is required.")
+    return f"JobApplicationAI:{normalized}"
+
+
+def run_security_command(args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
+    if not shutil.which("security"):
+        raise RuntimeError("macOS Keychain access is not available on this machine.")
+    result = subprocess.run(
+        ["security", *args],
+        capture_output=True,
+        text=True,
+        timeout=12,
+    )
+    if check and result.returncode != 0:
+        stderr = normalize_space(result.stderr or result.stdout or "Keychain command failed.")
+        raise RuntimeError(stderr)
+    return result
+
+
+def save_keychain_password(domain: str, username: str, password: str) -> None:
+    if not password:
+        return
+    service = keychain_service_name(domain)
+    user = normalize_space(username)
+    if not user:
+        raise RuntimeError("A username is required before saving a Keychain password.")
+    run_security_command(
+        [
+            "add-generic-password",
+            "-a",
+            user,
+            "-s",
+            service,
+            "-w",
+            password,
+            "-U",
+        ]
+    )
+
+
+def read_keychain_password(domain: str, username: str) -> str:
+    service = keychain_service_name(domain)
+    user = normalize_space(username)
+    if not user:
+        return ""
+    result = run_security_command(
+        [
+            "find-generic-password",
+            "-a",
+            user,
+            "-s",
+            service,
+            "-w",
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        return ""
+    return (result.stdout or "").strip()
+
+
+def delete_keychain_password(domain: str, username: str) -> None:
+    service = keychain_service_name(domain)
+    user = normalize_space(username)
+    if not user:
+        return
+    run_security_command(
+        [
+            "delete-generic-password",
+            "-a",
+            user,
+            "-s",
+            service,
+        ],
+        check=False,
+    )
+
+
+def password_is_saved_for_credential(credential: dict[str, Any]) -> bool:
+    if not credential:
+        return False
+    try:
+        return bool(read_keychain_password(str(credential.get("domain", "")), str(credential.get("username", ""))))
+    except Exception:
+        return False
+
+
+def save_site_credential(conn: sqlite3.Connection, payload: dict[str, Any]) -> int:
+    timestamp = now_iso()
+    domain = normalize_domain(str(payload.get("domain") or payload.get("login_url") or payload.get("job_url") or ""))
+    if not domain:
+        raise RuntimeError("A site credential needs a domain or login URL.")
+    login_url = normalize_space(str(payload.get("login_url", "")))
+    username = normalize_space(str(payload.get("username", "")))
+    notes = normalize_space(str(payload.get("notes", "")))
+    enabled = 1 if payload.get("enabled", True) else 0
+    password = str(payload.get("password", ""))
+    credential_id = int(payload.get("id") or 0)
+    existing = conn.execute("select * from site_credentials where domain=? limit 1", (domain,)).fetchone()
+    if existing and credential_id and int(existing["id"]) != credential_id:
+        raise RuntimeError("That domain already has saved credentials. Edit the existing row instead.")
+    if credential_id:
+        current = conn.execute("select * from site_credentials where id=?", (credential_id,)).fetchone()
+        if not current:
+            raise RuntimeError("Site credential not found.")
+        current_dict = row_to_dict(current) or {}
+        old_domain = str(current_dict.get("domain", ""))
+        old_username = str(current_dict.get("username", ""))
+        conn.execute(
+            """
+            update site_credentials
+            set domain=?, login_url=?, username=?, notes=?, enabled=?, updated_at=?
+            where id=?
+            """,
+            (domain, login_url, username, notes, enabled, timestamp, credential_id),
+        )
+        if password:
+            save_keychain_password(domain, username, password)
+            if (old_domain, old_username) != (domain, username):
+                delete_keychain_password(old_domain, old_username)
+        elif (old_domain, old_username) != (domain, username):
+            old_password = read_keychain_password(old_domain, old_username)
+            if old_password and username:
+                save_keychain_password(domain, username, old_password)
+            delete_keychain_password(old_domain, old_username)
+        conn.commit()
+        return credential_id
+
+    if existing:
+        credential_id = int(existing["id"])
+        conn.execute(
+            """
+            update site_credentials
+            set login_url=?, username=?, notes=?, enabled=?, updated_at=?
+            where id=?
+            """,
+            (login_url, username, notes, enabled, timestamp, credential_id),
+        )
+        if password:
+            save_keychain_password(domain, username, password)
+        conn.commit()
+        return credential_id
+
+    cur = conn.execute(
+        """
+        insert into site_credentials(domain, login_url, username, notes, enabled, created_at, updated_at)
+        values(?, ?, ?, ?, ?, ?, ?)
+        """,
+        (domain, login_url, username, notes, enabled, timestamp, timestamp),
+    )
+    credential_id = int(cur.lastrowid)
+    if password:
+        save_keychain_password(domain, username, password)
+    conn.commit()
+    return credential_id
+
+
+def delete_site_credential(conn: sqlite3.Connection, credential_id: int) -> None:
+    row = conn.execute("select * from site_credentials where id=?", (credential_id,)).fetchone()
+    if not row:
+        raise RuntimeError("Site credential not found.")
+    credential = row_to_dict(row) or {}
+    conn.execute("delete from site_credentials where id=?", (credential_id,))
+    conn.commit()
+    delete_keychain_password(str(credential.get("domain", "")), str(credential.get("username", "")))
+
+
+def find_site_credential_for_url(conn: sqlite3.Connection, url: str) -> dict[str, Any] | None:
+    variants = domain_variants_for_url(url)
+    if not variants:
+        return None
+    rows = [
+        row_to_dict(row) or {}
+        for row in conn.execute(
+            "select * from site_credentials where enabled=1 order by length(domain) desc, updated_at desc"
+        ).fetchall()
+    ]
+    for variant in variants:
+        for row in rows:
+            domain = normalize_domain(str(row.get("domain", "")))
+            if domain and (variant == domain or variant.endswith(f".{domain}")):
+                row["password_set"] = password_is_saved_for_credential(row)
+                row["keychain_service"] = keychain_service_name(domain)
+                return row
+    return None
+
+
+def read_json_file(path_value: str) -> Any:
+    path_text = normalize_space(path_value)
+    if not path_text:
+        return None
+    path = Path(path_text)
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def form_prep_report_for_app(application: dict[str, Any]) -> dict[str, Any] | None:
+    report = read_json_file(str(application.get("form_prep_report_path", "")))
+    if not isinstance(report, dict):
+        return None
+    return report
+
+
 def import_target_companies(conn: sqlite3.Connection, text: str) -> dict[str, Any]:
     ids: list[int] = []
     skipped: list[str] = []
@@ -4953,8 +5221,22 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
         raise RuntimeError("This job does not have a URL to open.")
 
     write_application_documents(job, app)
+    timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
+    report_path = FORM_PREP_DIR / f"application-{app_id}-{timestamp}.report.json"
+    screenshot_path = FORM_PREP_DIR / f"application-{app_id}-{timestamp}.png"
+    credential = find_site_credential_for_url(conn, str(job.get("url", ""))) or {}
+    started_at = now_iso()
+    conn.execute(
+        """
+        update applications
+        set form_prep_report_path=?, form_prep_screenshot_path=?, form_prep_started_at=?, updated_at=?
+        where id=?
+        """,
+        (str(report_path), str(screenshot_path), started_at, started_at, app_id),
+    )
+    conn.commit()
     task = {
-        "created_at": now_iso(),
+        "created_at": started_at,
         "profile": profile,
         "job": {
             "id": job.get("id"),
@@ -4963,15 +5245,28 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
             "location": job.get("location", ""),
             "url": job.get("url", ""),
             "source": job.get("source", ""),
+            "description": job.get("description", ""),
         },
         "application": {
             "id": app.get("id"),
+            "status": app.get("status", ""),
             "cover_letter": app.get("cover_letter", ""),
             "answers": app.get("answers", ""),
             "cv_notes": app.get("cv_notes", ""),
             "contact_email": app.get("contact_email", ""),
             "contact_name": app.get("contact_name", ""),
+            "research_notes": app.get("research_notes", ""),
+            "company_notes": app.get("company_notes", ""),
         },
+        "site_credential": {
+            "domain": credential.get("domain", ""),
+            "login_url": credential.get("login_url", ""),
+            "username": credential.get("username", ""),
+            "keychain_service": credential.get("keychain_service", ""),
+            "password_set": bool(credential.get("password_set")),
+        },
+        "report_path": str(report_path),
+        "screenshot_path": str(screenshot_path),
         "rules": {
             "final_submit": "Never click final submit. Stop for user review.",
             "captcha": "Do not bypass CAPTCHA, MFA, login challenges, rate limits, or anti-bot systems.",
@@ -5033,6 +5328,7 @@ def create_form_fill_smoke_task(conn: sqlite3.Connection) -> Path:
 """,
         encoding="utf-8",
     )
+    timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     task = {
         "created_at": now_iso(),
         "profile": profile,
@@ -5040,6 +5336,7 @@ def create_form_fill_smoke_task(conn: sqlite3.Connection) -> Path:
             **job,
             "url": html_path.as_uri(),
             "source": "local-smoke-test",
+            "description": "Local form filler smoke test.",
         },
         "application": {
             "id": "smoke",
@@ -5048,13 +5345,24 @@ def create_form_fill_smoke_task(conn: sqlite3.Connection) -> Path:
             "cv_notes": app.get("cv_notes", ""),
             "contact_email": "",
             "contact_name": "",
+            "research_notes": "",
+            "company_notes": "",
         },
+        "site_credential": {
+            "domain": "",
+            "login_url": "",
+            "username": "",
+            "keychain_service": "",
+            "password_set": False,
+        },
+        "report_path": str(FORM_PREP_DIR / f"smoke-test-{timestamp}.report.json"),
+        "screenshot_path": str(FORM_PREP_DIR / f"smoke-test-{timestamp}.png"),
         "rules": {
             "final_submit": "Never click final submit. This is a local smoke test.",
             "captcha": "No CAPTCHA or login is present in this local test.",
         },
     }
-    task_path = TASK_DIR / f"smoke-test-{dt.datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+    task_path = TASK_DIR / f"smoke-test-{timestamp}.json"
     task_path.write_text(json.dumps(task, indent=2, ensure_ascii=True), encoding="utf-8")
     return task_path
 
@@ -5576,6 +5884,14 @@ class AppHandler(BaseHTTPRequestHandler):
                         app = row_to_dict(conn.execute("select * from applications where id=?", (app_id,)).fetchone()) or {}
                         write_application_documents(job, app)
                 self.json({"ok": True})
+            elif parsed.path == "/api/site-credentials/save":
+                with connect() as conn:
+                    credential_id = save_site_credential(conn, data)
+                self.json({"ok": True, "id": credential_id})
+            elif parsed.path == "/api/site-credentials/delete":
+                with connect() as conn:
+                    delete_site_credential(conn, int(data.get("id")))
+                self.json({"ok": True})
             elif parsed.path == "/api/applications/regenerate-followup":
                 app_id = int(data.get("id"))
                 with connect() as conn:
@@ -6000,6 +6316,10 @@ def get_state() -> dict[str, Any]:
                 """
             ).fetchall()
         ]
+        for app in apps:
+            report = form_prep_report_for_app(app)
+            if report:
+                app["form_prep_report"] = report
         leads = [
             row_to_dict(row)
             for row in conn.execute("select * from company_leads order by updated_at desc, created_at desc").fetchall()
@@ -6058,6 +6378,11 @@ def get_state() -> dict[str, Any]:
                 """
             ).fetchall()
         ]
+        site_credentials = []
+        for row in conn.execute("select * from site_credentials order by enabled desc, updated_at desc, domain").fetchall():
+            credential = row_to_dict(row) or {}
+            credential["password_set"] = password_is_saved_for_credential(credential)
+            site_credentials.append(credential)
     return {
         "profile": profile,
         "jobs": jobs,
@@ -6075,6 +6400,7 @@ def get_state() -> dict[str, Any]:
         "email": email_config_status(),
         "inbox": inbox_config_status(),
         "inbox_messages": inbox_messages,
+        "site_credentials": site_credentials,
         "session_memory": read_session_memory(),
     }
 
@@ -6592,12 +6918,32 @@ INDEX_HTML = r"""<!doctype html>
 
     <section id="applications">
       <div class="grid">
-        <div class="panel">
-          <h2>Application Drafts</h2>
-          <div class="actions">
-            <button class="btn" onclick="runFormFillSmokeTest()">Run form-fill smoke test</button>
+        <div>
+          <div class="panel">
+            <h2>Application Drafts</h2>
+            <div class="actions">
+              <button class="btn" onclick="runFormFillSmokeTest()">Run form-fill smoke test</button>
+            </div>
+            <div id="applicationList"></div>
           </div>
-          <div id="applicationList"></div>
+          <div class="panel">
+            <h2>Site Login Credentials</h2>
+            <p class="muted">Saved locally. Metadata stays in this app database, and passwords stay in macOS Keychain. Use the site domain that the login page or ATS actually uses.</p>
+            <input id="credential_id" type="hidden">
+            <div class="row">
+              <div><label>Domain</label><input id="credential_domain" placeholder="linkedin.com"></div>
+              <div><label>Login URL</label><input id="credential_login_url" placeholder="https://www.linkedin.com/login"></div>
+              <div><label>Username / email</label><input id="credential_username" placeholder="your@email.com"></div>
+              <div><label>Password</label><input id="credential_password" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing password"></div>
+            </div>
+            <label>Notes</label><textarea id="credential_notes" placeholder="Optional notes about MFA, which flow this is for, or when to use it."></textarea>
+            <label><input id="credential_enabled" type="checkbox" style="width:auto" checked> Enabled for automatic login attempts</label>
+            <div class="actions">
+              <button class="btn primary" onclick="saveSiteCredential()">Save credential</button>
+              <button class="btn" onclick="clearSiteCredentialForm()">New credential</button>
+            </div>
+            <div id="siteCredentialList"></div>
+          </div>
         </div>
         <div class="panel">
           <h2>Edit Draft</h2>
@@ -6808,7 +7154,7 @@ Record:
   </main>
 
   <script>
-    let state = {profile: {}, jobs: [], applications: [], targets: []};
+    let state = {profile: {}, jobs: [], applications: [], targets: [], site_credentials: []};
     let selectedApplication = null;
     let selectedLead = null;
     let selectedTarget = null;
@@ -7484,6 +7830,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <div>
             ${app.research_notes ? `<span class="tag">research saved</span>` : `<span class="tag">research needed</span>`}
             <span class="tag">quality ${escapeHtml(app.quality_score || 0)}</span>
+            ${app.form_prep_started_at ? `<span class="tag">form prep ${escapeHtml(app.form_prep_report?.status || "started")}</span>` : ""}
             ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
           </div>
           <div class="actions">
@@ -7493,7 +7840,130 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           </div>
         </div>
       `).join("") || `<p class="muted">No application drafts yet.</p>`;
+      renderSiteCredentials();
       if (selectedApplication) selectApplication(selectedApplication.id, false);
+    }
+
+    function currentApplicationDomain() {
+      if (!selectedApplication || !selectedApplication.url) return "";
+      try {
+        return new URL(selectedApplication.url).hostname.replace(/^www\./, "");
+      } catch {
+        return "";
+      }
+    }
+
+    function clearSiteCredentialForm() {
+      document.getElementById("credential_id").value = "";
+      document.getElementById("credential_domain").value = currentApplicationDomain();
+      document.getElementById("credential_login_url").value = "";
+      document.getElementById("credential_username").value = state.profile.email || "";
+      document.getElementById("credential_password").value = "";
+      document.getElementById("credential_notes").value = "";
+      document.getElementById("credential_enabled").checked = true;
+    }
+
+    function editSiteCredential(id) {
+      const credential = (state.site_credentials || []).find(item => Number(item.id) === Number(id));
+      if (!credential) return;
+      document.getElementById("credential_id").value = credential.id || "";
+      document.getElementById("credential_domain").value = credential.domain || "";
+      document.getElementById("credential_login_url").value = credential.login_url || "";
+      document.getElementById("credential_username").value = credential.username || "";
+      document.getElementById("credential_password").value = "";
+      document.getElementById("credential_notes").value = credential.notes || "";
+      document.getElementById("credential_enabled").checked = Boolean(credential.enabled);
+      showTab("applications");
+    }
+
+    function renderSiteCredentials() {
+      const target = document.getElementById("siteCredentialList");
+      if (!target) return;
+      const credentials = state.site_credentials || [];
+      const suggestedDomain = currentApplicationDomain();
+      target.innerHTML = `
+        ${suggestedDomain ? `<p class="muted">Suggested domain from selected application: <strong>${escapeHtml(suggestedDomain)}</strong></p>` : ""}
+        ${credentials.map(credential => `
+          <div class="reminder">
+            <h3>${escapeHtml(credential.domain || "Unnamed domain")}</h3>
+            <div class="meta">${escapeHtml(credential.username || "No username")} - ${credential.enabled ? "enabled" : "paused"} - ${credential.password_set ? "password saved" : "password missing"}</div>
+            ${credential.login_url ? `<p class="meta"><a href="${escapeAttr(credential.login_url)}" target="_blank" rel="noreferrer">${escapeHtml(credential.login_url)}</a></p>` : ""}
+            ${credential.notes ? `<pre>${escapeHtml(credential.notes)}</pre>` : ""}
+            <div class="actions">
+              <button class="btn primary" onclick="editSiteCredential(${credential.id})">Edit</button>
+              <button class="btn" onclick="deleteSiteCredential(${credential.id})">Delete</button>
+            </div>
+          </div>
+        `).join("") || `<p class="muted">No site credentials saved yet.</p>`}
+      `;
+      if (!document.getElementById("credential_id").value) clearSiteCredentialForm();
+    }
+
+    async function saveSiteCredential() {
+      const payload = {
+        id: document.getElementById("credential_id").value || null,
+        domain: document.getElementById("credential_domain").value,
+        login_url: document.getElementById("credential_login_url").value,
+        username: document.getElementById("credential_username").value,
+        password: document.getElementById("credential_password").value,
+        notes: document.getElementById("credential_notes").value,
+        enabled: document.getElementById("credential_enabled").checked,
+        job_url: selectedApplication?.url || ""
+      };
+      const result = await api("/api/site-credentials/save", {method: "POST", body: JSON.stringify(payload)});
+      document.getElementById("credential_password").value = "";
+      message(`Saved site credential #${result.id}.`);
+      await load();
+      editSiteCredential(result.id);
+    }
+
+    async function deleteSiteCredential(id) {
+      if (!confirm("Delete this saved site credential and its Keychain password?")) return;
+      await api("/api/site-credentials/delete", {method: "POST", body: JSON.stringify({id})});
+      message("Site credential deleted.");
+      clearSiteCredentialForm();
+      await load();
+    }
+
+    function prepList(items, emptyText) {
+      if (!items || !items.length) return `<p class="muted">${escapeHtml(emptyText)}</p>`;
+      return `<ul>${items.slice(0, 8).map(item => `<li>${escapeHtml(item.prompt || item.label || item.name || item.reason || "Unnamed field")}${item.value_preview ? ` - ${escapeHtml(item.value_preview)}` : ""}</li>`).join("")}</ul>`;
+    }
+
+    function formPrepSummary(app) {
+      const report = app.form_prep_report || {};
+      if (!report || !Object.keys(report).length) {
+        if (!app.form_prep_started_at) return `<p class="muted">No form preparation run yet.</p>`;
+        return `<p class="muted">Form preparation started ${escapeHtml(app.form_prep_started_at || "")}, but no report has been saved yet.</p>`;
+      }
+      const reviewCount = (report.review_fields || []).length;
+      const skippedCount = (report.skipped_fields || []).length;
+      const filledCount = (report.filled_fields || []).length;
+      const login = report.login || {};
+      return `
+        <div class="notice ${report.errors?.length ? "bad" : ""}">
+          Status: ${escapeHtml(report.status || "unknown")}<br>
+          Filled: ${filledCount} field(s)<br>
+          Review: ${reviewCount} field(s)<br>
+          Skipped: ${skippedCount} field(s)<br>
+          Login: ${escapeHtml(login.status || "not attempted")}
+          ${report.last_url ? `<br>Current page: ${escapeHtml(report.last_url)}` : ""}
+          ${app.form_prep_screenshot_path ? `<br>Screenshot: ${escapeHtml(app.form_prep_screenshot_path)}` : ""}
+        </div>
+        <details>
+          <summary>Review-required fields</summary>
+          ${prepList(report.review_fields, "No review-only fields saved.")}
+        </details>
+        <details>
+          <summary>Skipped fields</summary>
+          ${prepList(report.skipped_fields, "No skipped fields saved.")}
+        </details>
+        <details>
+          <summary>Filled fields</summary>
+          ${prepList(report.filled_fields, "No filled fields saved.")}
+        </details>
+        ${report.errors?.length ? `<details><summary>Errors</summary><pre>${escapeHtml((report.errors || []).join("\\n"))}</pre></details>` : ""}
+      `;
     }
 
     function renderLeads() {
@@ -7607,13 +8077,22 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
     function selectApplication(id, switchTab = true) {
       selectedApplication = state.applications.find(app => app.id === id);
       if (!selectedApplication) return;
+      renderSiteCredentials();
       const app = selectedApplication;
+      const suggestedCredential = (state.site_credentials || []).find(item => {
+        const domain = item.domain || "";
+        return app.url && domain && app.url.includes(domain);
+      });
       document.getElementById("applicationEditor").innerHTML = `
         <h3>${escapeHtml(app.title)} at ${escapeHtml(app.company)}</h3>
         <label>Status</label>
         <select id="edit_status">
           ${["draft", "ready", "submitted", "interview", "rejected", "offer"].map(s => `<option value="${s}" ${app.status === s ? "selected" : ""}>${s}</option>`).join("")}
         </select>
+        <div class="notice">
+          Prepare form opens a visible browser, tries saved login/session data, fills what it can, writes a field-by-field report, and still stops before final submit.
+          ${suggestedCredential ? `<br>Saved login available for ${escapeHtml(suggestedCredential.domain)}.` : ""}
+        </div>
         <div class="row">
           <div><label>Contact name</label><input id="edit_contact_name" value="${escapeAttr(app.contact_name || "")}" placeholder="Jane"></div>
           <div><label>Contact role</label><input id="edit_contact_role" value="${escapeAttr(app.contact_role || "")}" placeholder="Marketing Manager"></div>
@@ -7629,6 +8108,8 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         <label>Quality notes</label><textarea id="edit_quality_notes" readonly>${escapeHtml(app.quality_notes || "")}</textarea>
         <label>Truthfulness / work authorization flags</label><textarea id="edit_truthfulness_flags" readonly>${escapeHtml(app.truthfulness_flags || "")}</textarea>
         <p class="muted">Quality score: ${escapeHtml(app.quality_score || 0)}. Recommended CV: ${escapeHtml(app.recommended_cv_version || "not assessed yet")}.</p>
+        <h3 style="margin-top:18px">Latest Form Prep Report</h3>
+        ${formPrepSummary(app)}
         <details><summary>Tailored CV brief preview</summary><pre>${escapeHtml(tailoredCvPreview(app))}</pre></details>
         <label>Cover letter</label><textarea id="edit_cover_letter" style="min-height:220px">${escapeHtml(app.cover_letter || "")}</textarea>
         <label>CV notes</label><textarea id="edit_cv_notes">${escapeHtml(app.cv_notes || "")}</textarea>
@@ -7655,6 +8136,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         </div>
         <p class="muted">Generated files are written into the local documents folder after saving.</p>
       `;
+      if (!document.getElementById("credential_id").value) clearSiteCredentialForm();
       if (switchTab) showTab("applications");
     }
 
