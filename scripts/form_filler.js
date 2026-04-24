@@ -87,6 +87,10 @@ function inferPlatform(task, pageUrl = "") {
   return "custom";
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
 function stepPatternsForPlatform(platform) {
   const generic = [/^next$/i, /^continue$/i, /save and continue/i, /continue application/i, /next step/i];
   if (platform === "greenhouse") return [...generic, /review/i];
@@ -660,6 +664,74 @@ async function isVisible(locator) {
   }
 }
 
+function persistReport(task, report) {
+  if (!task.report_path) return;
+  ensureDir(task.report_path);
+  fs.writeFileSync(task.report_path, JSON.stringify(report, null, 2), "utf8");
+}
+
+async function detectBlocker(page) {
+  const bodyText = shortText(await page.locator("body").innerText().catch(() => ""), 3000).toLowerCase();
+  const recaptcha = await page.locator('iframe[src*="recaptcha"], iframe[title*="captcha" i], iframe[src*="hcaptcha"]').count().catch(() => 0);
+  if (recaptcha || /verify you are human|security check|unusual traffic|robot|captcha/.test(bodyText)) {
+    return {
+      kind: "captcha",
+      message: "Security check or CAPTCHA is visible.",
+      url: page.url()
+    };
+  }
+  const otpInputCount = await page.locator('input[name*="code" i], input[id*="code" i], input[autocomplete="one-time-code"]').count().catch(() => 0);
+  if (otpInputCount || /verification code|authentication code|two-factor|two factor|multi-factor|enter the code|one-time passcode/.test(bodyText)) {
+    return {
+      kind: "mfa",
+      message: "A verification code or multi-factor prompt is visible.",
+      url: page.url()
+    };
+  }
+  return null;
+}
+
+async function waitForManualClearance(page, task, report, blocker) {
+  report.status = "waiting-user-action";
+  report.blocker = {
+    kind: blocker.kind,
+    message: blocker.message,
+    url: blocker.url || page.url(),
+    detected_at: report.blocker?.detected_at || nowIso(),
+    last_seen_at: nowIso()
+  };
+  persistReport(task, report);
+  const started = Date.now();
+  const timeoutMs = 20 * 60 * 1000;
+  while (Date.now() - started < timeoutMs) {
+    await page.waitForTimeout(4000);
+    pushUnique(report.visited_urls, page.url());
+    const current = await detectBlocker(page);
+    if (!current) {
+      report.blocker.cleared_at = nowIso();
+      report.status = "resuming";
+      persistReport(task, report);
+      return true;
+    }
+    report.blocker.last_seen_at = nowIso();
+    report.blocker.url = page.url();
+    persistReport(task, report);
+  }
+  record(report.review_fields, {
+    prompt: `Manual ${blocker.kind}`,
+    reason: `The ${blocker.kind} prompt stayed visible for more than 20 minutes. Clear it manually, then use Resume form if needed.`
+  });
+  report.status = "waiting-user-action";
+  persistReport(task, report);
+  return false;
+}
+
+async function resolveBlockerIfPresent(page, task, report) {
+  const blocker = await detectBlocker(page);
+  if (!blocker) return true;
+  return waitForManualClearance(page, task, report, blocker);
+}
+
 async function preLoginIfConfigured(page, task, report, platform) {
   const credential = task.site_credential || {};
   if (!credential.login_url || !credential.password_set) return false;
@@ -670,7 +742,14 @@ async function preLoginIfConfigured(page, task, report, platform) {
   report.login.login_url = credential.login_url;
   await page.goto(credential.login_url, { waitUntil: "domcontentloaded", timeout: 45000 });
   pushUnique(report.visited_urls, page.url());
-  await attemptLoginIfNeeded(page, task, report);
+  if (!(await resolveBlockerIfPresent(page, task, report))) return false;
+  const passwordField = page.locator('input[type="password"]').first();
+  if (!(await isVisible(passwordField))) {
+    report.login.status = "session-reused";
+    report.login.result_url = page.url();
+  } else {
+    await attemptLoginIfNeeded(page, task, report);
+  }
   await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
   pushUnique(report.visited_urls, page.url());
   return true;
@@ -737,6 +816,11 @@ async function attemptLoginIfNeeded(page, task, report) {
   await page.waitForLoadState("domcontentloaded", { timeout: 12000 }).catch(() => {});
   await page.waitForTimeout(2000);
   pushUnique(report.visited_urls, page.url());
+  const blockerCleared = await resolveBlockerIfPresent(page, task, report);
+  if (!blockerCleared) {
+    report.login.status = "waiting-user-action";
+    return false;
+  }
   const stillOnPassword = await isVisible(passwordField);
   report.login.status = stillOnPassword ? "needs-review" : "success";
   report.login.result_url = page.url();
@@ -793,21 +877,20 @@ async function fillCurrentStep(page, task, report, stepLabel) {
 async function saveArtifacts(page, task, report) {
   report.last_url = page.url();
   report.finished_at = new Date().toISOString();
-  report.status = report.errors.length
-    ? "needs-review"
-    : report.review_fields.length
-      ? "review-required"
-      : "ready-for-review";
+  if (!["waiting-user-action", "resuming"].includes(report.status)) {
+    report.status = report.errors.length
+      ? "needs-review"
+      : report.review_fields.length
+        ? "review-required"
+        : "ready-for-review";
+  }
   if (task.screenshot_path) {
     ensureDir(task.screenshot_path);
     await page.screenshot({ path: task.screenshot_path, fullPage: true }).catch((error) => {
       report.errors.push(`Screenshot failed: ${error.message}`);
     });
   }
-  if (task.report_path) {
-    ensureDir(task.report_path);
-    fs.writeFileSync(task.report_path, JSON.stringify(report, null, 2), "utf8");
-  }
+  persistReport(task, report);
 }
 
 async function main() {
@@ -829,6 +912,7 @@ async function main() {
     clicked_apply: false,
     visited_urls: [],
     login: { status: "not-attempted" },
+    blocker: {},
     scanned_fields: [],
     step_history: [],
     filled_fields: [],
@@ -852,19 +936,55 @@ async function main() {
     const platform = inferPlatform(task, task.job.url);
     console.log(`opening ${task.job.url}`);
     await preLoginIfConfigured(page, task, report, platform);
+    if (report.status === "waiting-user-action") {
+      await addReviewBanner(page, task).catch(() => {});
+      await saveArtifacts(page, task, report);
+      await page.waitForTimeout(24 * 60 * 60 * 1000);
+      return;
+    }
     await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
     pushUnique(report.visited_urls, page.url());
+    if (!(await resolveBlockerIfPresent(page, task, report))) {
+      await addReviewBanner(page, task).catch(() => {});
+      await saveArtifacts(page, task, report);
+      await page.waitForTimeout(24 * 60 * 60 * 1000);
+      return;
+    }
     await attemptLoginIfNeeded(page, task, report);
+    if (!(await resolveBlockerIfPresent(page, task, report))) {
+      await addReviewBanner(page, task).catch(() => {});
+      await saveArtifacts(page, task, report);
+      await page.waitForTimeout(24 * 60 * 60 * 1000);
+      return;
+    }
     await clickApplyIfPresent(page, report, platform);
+    if (!(await resolveBlockerIfPresent(page, task, report))) {
+      await addReviewBanner(page, task).catch(() => {});
+      await saveArtifacts(page, task, report);
+      await page.waitForTimeout(24 * 60 * 60 * 1000);
+      return;
+    }
     await attemptLoginIfNeeded(page, task, report);
     let lastFingerprint = "";
     for (let step = 1; step <= 4; step += 1) {
       const fields = await fillCurrentStep(page, task, report, `step-${step}`);
+      if (!(await resolveBlockerIfPresent(page, task, report))) {
+        await addReviewBanner(page, task).catch(() => {});
+        await saveArtifacts(page, task, report);
+        await page.waitForTimeout(24 * 60 * 60 * 1000);
+        return;
+      }
       const fingerprint = fieldFingerprint(fields);
       if (fingerprint && fingerprint === lastFingerprint) break;
       lastFingerprint = fingerprint;
       const advancedWith = await clickSafeContinue(page, report, platform);
       if (!advancedWith) break;
+      if (!(await resolveBlockerIfPresent(page, task, report))) {
+        await addReviewBanner(page, task).catch(() => {});
+        await saveArtifacts(page, task, report);
+        await page.waitForTimeout(24 * 60 * 60 * 1000);
+        return;
+      }
       await attemptLoginIfNeeded(page, task, report);
     }
     await addReviewBanner(page, task).catch(() => {});

@@ -863,6 +863,7 @@ def init_db() -> None:
                 follow_up_sent_at text not null default '',
                 form_prep_report_path text not null default '',
                 form_prep_screenshot_path text not null default '',
+                form_prep_task_path text not null default '',
                 form_prep_started_at text not null default '',
                 created_at text not null,
                 updated_at text not null
@@ -1022,6 +1023,7 @@ def init_db() -> None:
         ensure_column(conn, "applications", "recommended_cv_version", "text not null default ''")
         ensure_column(conn, "applications", "form_prep_report_path", "text not null default ''")
         ensure_column(conn, "applications", "form_prep_screenshot_path", "text not null default ''")
+        ensure_column(conn, "applications", "form_prep_task_path", "text not null default ''")
         ensure_column(conn, "applications", "form_prep_started_at", "text not null default ''")
         ensure_column(conn, "jobs", "too_senior", "integer not null default 0")
         seed_default_cv_versions(conn)
@@ -5250,15 +5252,6 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
     screenshot_path = FORM_PREP_DIR / f"application-{app_id}-{timestamp}.png"
     credential = find_site_credential_for_url(conn, str(job.get("url", ""))) or {}
     started_at = now_iso()
-    conn.execute(
-        """
-        update applications
-        set form_prep_report_path=?, form_prep_screenshot_path=?, form_prep_started_at=?, updated_at=?
-        where id=?
-        """,
-        (str(report_path), str(screenshot_path), started_at, started_at, app_id),
-    )
-    conn.commit()
     task = {
         "created_at": started_at,
         "platform": detect_application_platform(str(job.get("url", "")), str(job.get("source", ""))),
@@ -5299,6 +5292,15 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
     }
     task_path = TASK_DIR / f"application-{app_id}-{dt.datetime.now().strftime('%Y%m%d%H%M%S')}.json"
     task_path.write_text(json.dumps(task, indent=2, ensure_ascii=True), encoding="utf-8")
+    conn.execute(
+        """
+        update applications
+        set form_prep_report_path=?, form_prep_screenshot_path=?, form_prep_task_path=?, form_prep_started_at=?, updated_at=?
+        where id=?
+        """,
+        (str(report_path), str(screenshot_path), str(task_path), started_at, started_at, app_id),
+    )
+    conn.commit()
     return task_path
 
 
@@ -5390,6 +5392,19 @@ def create_form_fill_smoke_task(conn: sqlite3.Connection) -> Path:
     }
     task_path = TASK_DIR / f"smoke-test-{timestamp}.json"
     task_path.write_text(json.dumps(task, indent=2, ensure_ascii=True), encoding="utf-8")
+    return task_path
+
+
+def latest_form_fill_task_path(conn: sqlite3.Connection, app_id: int) -> Path:
+    row = conn.execute(
+        "select form_prep_task_path from applications where id=?",
+        (app_id,),
+    ).fetchone()
+    if not row or not row["form_prep_task_path"]:
+        raise RuntimeError("No saved form-prep task exists for this application yet.")
+    task_path = Path(str(row["form_prep_task_path"]))
+    if not task_path.exists():
+        raise RuntimeError("The saved form-prep task file no longer exists. Run Prepare form again.")
     return task_path
 
 
@@ -6020,6 +6035,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 app_id = int(data.get("id"))
                 with connect() as conn:
                     task_path = create_form_fill_task(conn, app_id)
+                pid = launch_form_filler(task_path)
+                self.json({"ok": True, "pid": pid, "task": str(task_path)})
+            elif parsed.path == "/api/applications/resume-form":
+                app_id = int(data.get("id"))
+                with connect() as conn:
+                    task_path = latest_form_fill_task_path(conn, app_id)
                 pid = launch_form_filler(task_path)
                 self.json({"ok": True, "pid": pid, "task": str(task_path)})
             elif parsed.path == "/api/applications/form-feedback":
@@ -7966,6 +7987,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       const skippedCount = (report.skipped_fields || []).length;
       const filledCount = (report.filled_fields || []).length;
       const login = report.login || {};
+      const blocker = report.blocker || {};
       return `
         <div class="notice ${report.errors?.length ? "bad" : ""}">
           Platform: ${escapeHtml(report.platform || "unknown")}<br>
@@ -7974,6 +7996,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           Review: ${reviewCount} field(s)<br>
           Skipped: ${skippedCount} field(s)<br>
           Login: ${escapeHtml(login.status || "not attempted")}
+          ${blocker.kind ? `<br>Waiting on you: ${escapeHtml(blocker.kind)}${blocker.message ? ` - ${escapeHtml(blocker.message)}` : ""}` : ""}
           ${report.last_url ? `<br>Current page: ${escapeHtml(report.last_url)}` : ""}
           ${app.form_prep_screenshot_path ? `<br>Screenshot: ${escapeHtml(app.form_prep_screenshot_path)}` : ""}
         </div>
@@ -8149,6 +8172,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <button class="btn" onclick="useSavedResearchUrlNow()">Use saved URL now</button>
           <button class="btn" onclick="regenerateFollowUp()">Regenerate personalized follow-up</button>
           <button class="btn" onclick="prepareApplicationForm()">Prepare form</button>
+          <button class="btn" onclick="resumeApplicationForm()">Resume form</button>
           <button class="btn warn" onclick="markApplicationSubmitted()">Mark submitted</button>
           <a class="btn" href="${mailto(app)}">Open email draft</a>
           <button class="btn" onclick="sendFollowUp()">Send follow-up</button>
@@ -8691,7 +8715,13 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       if (!selectedApplication) return;
       await saveApplication();
       const result = await api("/api/applications/prepare-form", {method: "POST", body: JSON.stringify({id: selectedApplication.id})});
-      message(`Visible browser launched for form preparation. Process ${result.pid}. Review everything manually and submit yourself.`);
+      message(`Visible browser launched for form preparation. Process ${result.pid}. If a CAPTCHA or MFA prompt appears, clear it in the browser and the run should continue. Use Resume form if you close the browser and need to restart from the saved task.`);
+    }
+
+    async function resumeApplicationForm() {
+      if (!selectedApplication) return;
+      const result = await api("/api/applications/resume-form", {method: "POST", body: JSON.stringify({id: selectedApplication.id})});
+      message(`Form preparation resumed in a visible browser. Process ${result.pid}. If you cleared a challenge earlier, the saved session should carry forward.`);
     }
 
     async function saveFormFillFeedback() {
