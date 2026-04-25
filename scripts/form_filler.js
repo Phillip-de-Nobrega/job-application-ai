@@ -5,6 +5,8 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 const { chromium } = require("playwright");
 
+const MAC_GOOGLE_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
 function argValue(flag) {
   const index = process.argv.indexOf(flag);
   if (index === -1 || index + 1 >= process.argv.length) return "";
@@ -91,6 +93,47 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+async function launchBestBrowser(report) {
+  const base = {
+    headless: false,
+    slowMo: 70,
+    args: [
+      "--disable-crashpad",
+      "--disable-crash-reporter",
+      "--disable-breakpad"
+    ]
+  };
+  const attempts = [];
+  if (fs.existsSync(MAC_GOOGLE_CHROME)) {
+    attempts.push({
+      label: "system-google-chrome",
+      options: { ...base, executablePath: MAC_GOOGLE_CHROME }
+    });
+  }
+  attempts.push({
+    label: "playwright-chrome-channel",
+    options: { ...base, channel: "chrome" }
+  });
+  attempts.push({
+    label: "playwright-chromium",
+    options: { ...base }
+  });
+
+  const errors = [];
+  for (const attempt of attempts) {
+    try {
+      const browser = await chromium.launch(attempt.options);
+      report.browser = { launcher: attempt.label };
+      return browser;
+    } catch (error) {
+      errors.push(`${attempt.label}: ${error.message}`);
+    }
+  }
+  report.browser = { launcher: "failed" };
+  report.errors.push(...errors);
+  throw new Error(errors.join("\n"));
+}
+
 function stepPatternsForPlatform(platform) {
   const generic = [/^next$/i, /^continue$/i, /save and continue/i, /continue application/i, /next step/i];
   if (platform === "greenhouse") return [...generic, /review/i];
@@ -129,16 +172,21 @@ async function fillFirst(locator, value, label, report) {
   }
 }
 
+function matcher(pattern) {
+  if (pattern instanceof RegExp) return pattern;
+  return new RegExp(String(pattern), "i");
+}
+
 async function fillByLabels(page, labels, value, label, report) {
   for (const text of labels) {
-    if (await fillFirst(page.getByLabel(new RegExp(text, "i")), value, label, report)) return true;
+    if (await fillFirst(page.getByLabel(matcher(text)), value, label, report)) return true;
   }
   return false;
 }
 
 async function fillByPlaceholders(page, placeholders, value, label, report) {
   for (const text of placeholders) {
-    if (await fillFirst(page.getByPlaceholder(new RegExp(text, "i")), value, label, report)) return true;
+    if (await fillFirst(page.getByPlaceholder(matcher(text)), value, label, report)) return true;
   }
   return false;
 }
@@ -193,7 +241,28 @@ async function chooseRadioOrCheckbox(page, labels, label, report) {
   return false;
 }
 
+async function clickAndFollow(page, locator, report) {
+  const context = page.context();
+  const popupPromise = context.waitForEvent("page", { timeout: 4000 }).catch(() => null);
+  const currentUrl = page.url();
+  await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await locator.click({ timeout: 5000 });
+  const popup = await popupPromise;
+  if (popup) {
+    await popup.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+    pushUnique(report.visited_urls, popup.url());
+    return popup;
+  }
+  await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(1200);
+  if (page.url() !== currentUrl) {
+    pushUnique(report.visited_urls, page.url());
+  }
+  return page;
+}
+
 async function clickApplyIfPresent(page, report, platform) {
+  await page.waitForTimeout(1500).catch(() => {});
   const labels = [
     /apply for this job/i,
     /apply now/i,
@@ -209,13 +278,11 @@ async function clickApplyIfPresent(page, report, platform) {
     try {
       const button = page.getByRole("button", { name }).first();
       if (await button.count()) {
-        await button.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-        await button.click({ timeout: 5000 });
-        await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+        page = await clickAndFollow(page, button, report);
         report.clicked_apply = true;
         pushUnique(report.visited_urls, page.url());
         console.log("clicked apply/start button");
-        return true;
+        return page;
       }
     } catch (error) {
       // Continue.
@@ -223,37 +290,70 @@ async function clickApplyIfPresent(page, report, platform) {
     try {
       const link = page.getByRole("link", { name }).first();
       if (await link.count()) {
-        await link.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-        await link.click({ timeout: 5000 });
-        await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+        page = await clickAndFollow(page, link, report);
         report.clicked_apply = true;
         pushUnique(report.visited_urls, page.url());
         console.log("clicked apply/start link");
-        return true;
+        return page;
       }
     } catch (error) {
       // Continue.
     }
   }
-  return false;
+  const textFallbacks = [
+    /apply for this job/i,
+    /apply now/i,
+    /start application/i,
+    /^apply$/i
+  ];
+  for (const pattern of textFallbacks) {
+    try {
+      const locator = page.getByText(pattern).first();
+      if (await locator.count()) {
+        page = await clickAndFollow(page, locator, report);
+        report.clicked_apply = true;
+        pushUnique(report.visited_urls, page.url());
+        console.log("clicked apply/start text fallback");
+        return page;
+      }
+    } catch (error) {
+      // Continue.
+    }
+  }
+  if (platform === "ashby") {
+    try {
+      const currentUrl = page.url();
+      const directApplyUrl = currentUrl.replace(/\/+$/, "") + "/application";
+      if (directApplyUrl !== currentUrl) {
+        await page.goto(directApplyUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+        report.clicked_apply = true;
+        pushUnique(report.visited_urls, page.url());
+        console.log("navigated directly to Ashby application");
+        return page;
+      }
+    } catch (error) {
+      report.errors.push(`Ashby direct application fallback failed: ${error.message}`);
+    }
+  }
+  return page;
 }
 
 async function fillProfileFields(page, task, report) {
   const profile = task.profile || {};
   const name = splitName(profile.full_name);
 
-  await fillByLabels(page, ["first name", "given name"], name.first, "first name", report);
-  await fillByLabels(page, ["last name", "surname", "family name"], name.last, "last name", report);
-  await fillByLabels(page, ["full name", "^name$"], profile.full_name, "full name", report);
-  await fillByLabels(page, ["email", "e-mail"], profile.email, "email", report);
-  await fillByLabels(page, ["phone", "mobile", "telephone"], profile.phone, "phone", report);
-  await fillByLabels(page, ["location", "city", "current location"], profile.location, "location", report);
-  await fillByLabels(page, ["linkedin", "linked in"], profile.linkedin_url, "linkedin", report);
-  await fillByLabels(page, ["portfolio", "website"], profile.portfolio_url || profile.linkedin_url, "portfolio/website", report);
+  await fillByLabels(page, [/\bfirst name\b/i, /\bgiven name\b/i], name.first, "first name", report);
+  await fillByLabels(page, [/\blast name\b/i, /\bsurname\b/i, /\bfamily name\b/i], name.last, "last name", report);
+  await fillByLabels(page, [/\bfull name\b/i, /^name$/i], profile.full_name, "full name", report);
+  await fillByLabels(page, [/\bemail\b/i, /\be-mail\b/i], profile.email, "email", report);
+  await fillByLabels(page, [/\bphone\b/i, /\bmobile\b/i, /\btelephone\b/i], profile.phone, "phone", report);
+  await fillByLabels(page, [/\bcurrent location\b/i, /^location$/i, /^\s*city\s*$/i], profile.location, "location", report);
+  await fillByLabels(page, [/linkedin/i, /linked in/i], profile.linkedin_url, "linkedin", report);
+  await fillByLabels(page, [/\bportfolio\b/i, /\bwebsite\b/i], profile.portfolio_url || profile.linkedin_url, "portfolio/website", report);
 
-  await fillByPlaceholders(page, ["email", "e-mail"], profile.email, "email placeholder", report);
-  await fillByPlaceholders(page, ["phone", "mobile"], profile.phone, "phone placeholder", report);
-  await fillByPlaceholders(page, ["linkedin"], profile.linkedin_url, "linkedin placeholder", report);
+  await fillByPlaceholders(page, [/\bemail\b/i, /\be-mail\b/i], profile.email, "email placeholder", report);
+  await fillByPlaceholders(page, [/\bphone\b/i, /\bmobile\b/i], profile.phone, "phone placeholder", report);
+  await fillByPlaceholders(page, [/linkedin/i], profile.linkedin_url, "linkedin placeholder", report);
 
   await fillBySelectors(page, [
     'input[name="first_name"]',
@@ -510,25 +610,46 @@ function fieldFingerprint(fields) {
   return fields.map(field => `${field.tag}:${field.type}:${field.name || field.id || ""}:${field.prompt || ""}`).join("|");
 }
 
+function isLikelyApplicationField(field) {
+  const prompt = `${field.prompt || ""} ${field.name || ""} ${field.id || ""}`.toLowerCase();
+  if (/(search|sort by|share this job|filter jobs|location search)/.test(prompt)) return false;
+  if (field.tag === "textarea") return true;
+  if (field.tag === "select" && field.options && field.options.length > 0 && field.options.length < 50) return true;
+  if (field.type === "file" || field.type === "email" || field.type === "tel" || field.type === "date") return true;
+  if (/(first name|last name|surname|full name|email|phone|mobile|location|country|linkedin|website|portfolio|cover letter|salary|compensation|availability|start date|notice|work authorization|right to work|visa|resume|cv)/.test(prompt)) return true;
+  return false;
+}
+
+async function hasVisibleApplicationFields(page) {
+  const fields = await scanVisibleFields(page).catch(() => []);
+  const relevant = fields.filter(isLikelyApplicationField);
+  return {
+    hasFields: relevant.length >= 2,
+    relevantCount: relevant.length,
+    fields: relevant
+  };
+}
+
 function classifyField(field) {
   const text = `${field.prompt || ""} ${field.name || ""} ${field.id || ""} ${field.placeholder || ""}`.toLowerCase();
-  if (/(first name|given name)/.test(text)) return "first_name";
-  if (/(last name|surname|family name)/.test(text)) return "last_name";
-  if (/(full name|^name$|candidate name)/.test(text)) return "full_name";
-  if (/(email|e-mail)/.test(text)) return "email";
-  if (/(phone|mobile|telephone|cell)/.test(text)) return "phone";
+  if (/\b(first name|given name)\b/.test(text)) return "first_name";
+  if (/\b(last name|surname|family name)\b/.test(text)) return "last_name";
+  if (/\b(full name|candidate name)\b/.test(text) || /^name\b/.test(text)) return "full_name";
+  if (/\b(email|e-mail)\b/.test(text)) return "email";
+  if (/\b(phone|mobile|telephone|cell)\b/.test(text)) return "phone";
   if (/linkedin/.test(text)) return "linkedin";
-  if (/(portfolio|website|personal site)/.test(text)) return "website";
-  if (/(current location|location|city|town|where are you based)/.test(text)) return "location";
-  if (/country/.test(text)) return "country";
-  if (/(cover letter|cover note|message to hiring|additional information)/.test(text)) return "cover_letter";
+  if (/\b(portfolio|website|personal site)\b/.test(text)) return "website";
+  if (/\b(current location|location|city|town|where are you based)\b/.test(text)) return "location";
+  if (/\bcountry\b/.test(text)) return "country";
+  if (/\b(cover letter|cover note|message to hiring|additional information)\b/.test(text)) return "cover_letter";
   if (/(why.*(role|company|interested)|motivation|why do you want|why would you like)/.test(text)) return "motivation";
-  if (/(salary|compensation|pay expectation|rate)/.test(text)) return "salary";
-  if (/(availability|start date|notice period|when can you start)/.test(text)) return "availability";
-  if (/(work authorization|right to work|visa|sponsorship|authorized to work)/.test(text)) return "work_authorization";
-  if (/reference/.test(text)) return "references";
-  if (/(gender|ethnicity|race|disability|veteran|demographic|sexual orientation)/.test(text)) return "demographics";
-  if (/(resume|cv|curriculum vitae)/.test(text)) return "cv_upload";
+  if (/\b(salary|compensation|pay expectation|rate)\b/.test(text)) return "salary";
+  if (/\b(availability|start date|notice period|when can you start)\b/.test(text)) return "availability";
+  if (/\b(work authorization|right to work|visa|sponsorship|authorized to work)\b/.test(text)) return "work_authorization";
+  if (/\breference/.test(text)) return "references";
+  if (/\b(gender|ethnicity|race|disability|veteran|demographic|sexual orientation)\b/.test(text)) return "demographics";
+  if (/\b(resume|cv|curriculum vitae)\b/.test(text)) return "cv_upload";
+  if (/\b(how many years|briefly describe|experience do you have|tell us about|share an example)\b/.test(text)) return "custom_question";
   return "";
 }
 
@@ -560,6 +681,37 @@ function answerForCategory(category, field, task) {
     if (sponsorship && (southAfrica || unitedKingdom)) return { choice: "No", review: true, reason: "Check sponsorship wording before submit." };
     if (!sponsorship && (southAfrica || unitedKingdom)) return { choice: "Yes", value: profile.work_authorization, review: true, reason: "Check right-to-work wording before submit." };
     return { value: profile.work_authorization, review: true, reason: "Legal/work authorization wording needs manual review." };
+  }
+  if (category === "custom_question") {
+    const prompt = `${field.prompt || ""} ${field.name || ""}`.toLowerCase();
+    if (/health[, ]+wellness[, ]+and fitness industry/.test(prompt)) {
+      return {
+        value: field.type === "number"
+          ? "0"
+          : "0 years of direct full-time marketing work inside a health, wellness, or fitness company. My closest relevant experience is sports coaching, endurance training, and building my own triathlon and gym training app, so I understand the audience and category well even though my formal brand experience is still early-career.",
+        review: true,
+        reason: "Custom industry-experience answer generated from profile context."
+      };
+    }
+    if (/social media influencers/.test(prompt)) {
+      return {
+        value: "I do not have direct professional ownership of influencer campaigns yet. My closest experience is producing social content, managing posting calendars, and thinking carefully about audience-brand fit, so I would be honest that influencer execution is an area I am ready to grow into rather than something I have already led end to end.",
+        review: true,
+        reason: "Custom influencer answer generated from profile context."
+      };
+    }
+    if (/meta ads/.test(prompt)) {
+      return {
+        value: "I do not have full professional campaign ownership with Meta Ads yet, so I would not overclaim years of direct paid social execution. I do have digital marketing training, Google Analytics exposure, and a strong understanding of targeting, creative testing, and performance thinking, but I would treat this as an honest early-career growth area rather than pretend I have already led a major Meta campaign.",
+        review: true,
+        reason: "Custom Meta Ads answer generated from profile context."
+      };
+    }
+    return {
+      value: app.answers || app.cover_letter || "",
+      review: true,
+      reason: "General custom question answer; review before submit."
+    };
   }
   return { value: "" };
 }
@@ -625,12 +777,36 @@ async function fillScannedFields(page, task, report, stepLabel = "step-1") {
   for (const field of fields) {
     const prompt = field.prompt || field.name || field.id || "Unnamed field";
     const category = classifyField(field);
-    if (!category || category === "cv_upload") continue;
-    if (field.currentValue) continue;
+    if (category === "cv_upload") {
+      try {
+        const locator = allLocators.nth(field.index);
+        const cvPath = task.profile && task.profile.cv_path;
+        if (cvPath && fs.existsSync(cvPath)) {
+          await locator.setInputFiles(cvPath, { timeout: 8000 });
+          record(report.filled_fields, { prompt, value: path.basename(cvPath), category, kind: "file" });
+        } else {
+          record(report.review_fields, { prompt, category, reason: "CV path was not available for this upload field." });
+        }
+      } catch (error) {
+        record(report.review_fields, { prompt, category, reason: error.message });
+      }
+      continue;
+    }
+    if (!category) continue;
+    const currentValue = String(field.currentValue || "").trim();
+    const looksLikeBadPrefill = Boolean(
+      currentValue
+      && category === "custom_question"
+      && currentValue.toLowerCase() === String(task.profile?.location || "").trim().toLowerCase()
+    );
+    if (currentValue && !looksLikeBadPrefill) continue;
     const locator = allLocators.nth(field.index);
     const answer = answerForCategory(category, field, task);
     answer.category = category;
     try {
+      if (looksLikeBadPrefill) {
+        await locator.fill("", { timeout: 3000 }).catch(() => {});
+      }
       const filled = await fillLocatorFromScan(locator, field, answer, report);
       if (filled) {
         if (answer.review) {
@@ -729,6 +905,22 @@ async function waitForManualClearance(page, task, report, blocker) {
 async function resolveBlockerIfPresent(page, task, report) {
   const blocker = await detectBlocker(page);
   if (!blocker) return true;
+  const formVisibility = await hasVisibleApplicationFields(page);
+  if (formVisibility.hasFields) {
+    record(report.review_fields, {
+      prompt: `Visible ${blocker.kind}`,
+      reason: `${blocker.message} The form fields are already visible, so the assistant will keep filling and leave the challenge for your review.`
+    });
+    report.blocker = {
+      kind: blocker.kind,
+      message: blocker.message,
+      url: blocker.url || page.url(),
+      detected_at: report.blocker?.detected_at || nowIso(),
+      last_seen_at: nowIso(),
+      mode: "visible-with-form"
+    };
+    return true;
+  }
   return waitForManualClearance(page, task, report, blocker);
 }
 
@@ -871,7 +1063,16 @@ async function fillCurrentStep(page, task, report, stepLabel) {
   await uploadCv(page, task, report);
   await fillTextAreas(page, task, report);
   await answerCommonScreening(page, task, report);
-  return fillScannedFields(page, task, report, stepLabel);
+  let fields = await fillScannedFields(page, task, report, stepLabel);
+  if (!fields.length && !report.clicked_apply && ["ashby", "greenhouse", "lever", "smartrecruiters", "workable", "teamtailor"].includes(report.platform || "")) {
+    page = await clickApplyIfPresent(page, report, report.platform || "");
+    await fillProfileFields(page, task, report);
+    await uploadCv(page, task, report);
+    await fillTextAreas(page, task, report);
+    await answerCommonScreening(page, task, report);
+    fields = await fillScannedFields(page, task, report, `${stepLabel}-after-apply`);
+  }
+  return { page, fields };
 }
 
 async function saveArtifacts(page, task, report) {
@@ -893,6 +1094,16 @@ async function saveArtifacts(page, task, report) {
   persistReport(task, report);
 }
 
+async function saveSessionState(context, statePath, report) {
+  if (!statePath) return;
+  try {
+    ensureDir(statePath);
+    await context.storageState({ path: statePath });
+  } catch (error) {
+    if (report) report.errors.push(`Could not save browser session state: ${error.message}`);
+  }
+}
+
 async function main() {
   const taskPath = argValue("--task");
   if (!taskPath) {
@@ -909,6 +1120,7 @@ async function main() {
     task_path: taskPath,
     platform: inferPlatform(task),
     status: "started",
+    browser: {},
     clicked_apply: false,
     visited_urls: [],
     login: { status: "not-attempted" },
@@ -921,15 +1133,15 @@ async function main() {
     errors: []
   };
 
-  const userDataDir = path.join(path.dirname(path.dirname(taskPath)), "playwright-profile");
-  fs.mkdirSync(userDataDir, { recursive: true });
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    headless: false,
-    slowMo: 70,
+  const dataDir = path.dirname(path.dirname(taskPath));
+  const statePath = path.join(dataDir, "playwright-storage-state.json");
+  const browser = await launchBestBrowser(report);
+  const context = await browser.newContext({
     viewport: { width: 1380, height: 920 },
-    acceptDownloads: true
+    acceptDownloads: true,
+    storageState: fs.existsSync(statePath) ? statePath : undefined
   });
-  const page = context.pages()[0] || await context.newPage();
+  let page = await context.newPage();
   page.setDefaultTimeout(7000);
 
   try {
@@ -937,6 +1149,7 @@ async function main() {
     console.log(`opening ${task.job.url}`);
     await preLoginIfConfigured(page, task, report, platform);
     if (report.status === "waiting-user-action") {
+      await saveSessionState(context, statePath, report);
       await addReviewBanner(page, task).catch(() => {});
       await saveArtifacts(page, task, report);
       await page.waitForTimeout(24 * 60 * 60 * 1000);
@@ -945,30 +1158,39 @@ async function main() {
     await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
     pushUnique(report.visited_urls, page.url());
     if (!(await resolveBlockerIfPresent(page, task, report))) {
+      await saveSessionState(context, statePath, report);
       await addReviewBanner(page, task).catch(() => {});
       await saveArtifacts(page, task, report);
       await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
     await attemptLoginIfNeeded(page, task, report);
+    await saveSessionState(context, statePath, report);
     if (!(await resolveBlockerIfPresent(page, task, report))) {
+      await saveSessionState(context, statePath, report);
       await addReviewBanner(page, task).catch(() => {});
       await saveArtifacts(page, task, report);
       await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
-    await clickApplyIfPresent(page, report, platform);
+    page = await clickApplyIfPresent(page, report, platform);
+    await saveSessionState(context, statePath, report);
     if (!(await resolveBlockerIfPresent(page, task, report))) {
+      await saveSessionState(context, statePath, report);
       await addReviewBanner(page, task).catch(() => {});
       await saveArtifacts(page, task, report);
       await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
     await attemptLoginIfNeeded(page, task, report);
+    await saveSessionState(context, statePath, report);
     let lastFingerprint = "";
     for (let step = 1; step <= 4; step += 1) {
-      const fields = await fillCurrentStep(page, task, report, `step-${step}`);
+      const stepResult = await fillCurrentStep(page, task, report, `step-${step}`);
+      page = stepResult.page;
+      const fields = stepResult.fields;
       if (!(await resolveBlockerIfPresent(page, task, report))) {
+        await saveSessionState(context, statePath, report);
         await addReviewBanner(page, task).catch(() => {});
         await saveArtifacts(page, task, report);
         await page.waitForTimeout(24 * 60 * 60 * 1000);
@@ -980,21 +1202,27 @@ async function main() {
       const advancedWith = await clickSafeContinue(page, report, platform);
       if (!advancedWith) break;
       if (!(await resolveBlockerIfPresent(page, task, report))) {
+        await saveSessionState(context, statePath, report);
         await addReviewBanner(page, task).catch(() => {});
         await saveArtifacts(page, task, report);
         await page.waitForTimeout(24 * 60 * 60 * 1000);
         return;
       }
       await attemptLoginIfNeeded(page, task, report);
+      await saveSessionState(context, statePath, report);
     }
+    await saveSessionState(context, statePath, report);
     await addReviewBanner(page, task).catch(() => {});
     await saveArtifacts(page, task, report);
     console.log("Form preparation complete. Review manually and submit yourself. Close the browser when done.");
     await page.waitForTimeout(24 * 60 * 60 * 1000);
   } catch (error) {
     report.errors.push(error.stack || error.message);
+    await saveSessionState(context, statePath, report).catch(() => {});
     await saveArtifacts(page, task, report).catch(() => {});
     throw error;
+  } finally {
+    await browser.close().catch(() => {});
   }
 }
 

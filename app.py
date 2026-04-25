@@ -4028,6 +4028,17 @@ def is_job_board_url(url: str) -> bool:
     return any(term in lower for term in blocked)
 
 
+def is_board_prep_blocked_url(url: str) -> bool:
+    lower = normalize_space(url).lower()
+    if not lower:
+        return False
+    # RemoteOK listing pages currently gate external applies behind signup/CAPTCHA,
+    # which makes them poor targets for supervised form preparation.
+    if "remoteok.com/remote-jobs/" in lower:
+        return True
+    return False
+
+
 def is_useful_company_url(url: str) -> bool:
     parsed = urllib.parse.urlparse(url)
     host = parsed.netloc.lower().replace("www.", "")
@@ -5245,6 +5256,11 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
         raise RuntimeError("Job not found")
     if not job.get("url"):
         raise RuntimeError("This job does not have a URL to open.")
+    if is_board_prep_blocked_url(str(job.get("url", ""))):
+        raise RuntimeError(
+            "This job still points to a RemoteOK listing page, which is blocking direct form preparation behind signup/CAPTCHA. "
+            "Use a direct company/ATS apply URL first, then prepare the form from that real application page."
+        )
 
     write_application_documents(job, app)
     timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
@@ -6968,6 +6984,7 @@ INDEX_HTML = r"""<!doctype html>
         <div>
           <div class="panel">
             <h2>Application Drafts</h2>
+            <p class="muted">Use `Prepare form` on any draft card below to open the live application page in a visible browser. You can also open a draft first and use the same action in the editor.</p>
             <div class="actions">
               <button class="btn" onclick="runFormFillSmokeTest()">Run form-fill smoke test</button>
             </div>
@@ -7877,11 +7894,15 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <div>
             ${app.research_notes ? `<span class="tag">research saved</span>` : `<span class="tag">research needed</span>`}
             <span class="tag">quality ${escapeHtml(app.quality_score || 0)}</span>
+            ${String(app.url || "").toLowerCase().includes("remoteok.com/remote-jobs/") ? `<span class="tag">board login wall</span>` : ""}
             ${app.form_prep_started_at ? `<span class="tag">form prep ${escapeHtml(app.form_prep_report?.status || "started")}</span>` : ""}
             ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
           </div>
+          ${String(app.url || "").toLowerCase().includes("remoteok.com/remote-jobs/") ? `<p class="muted">This draft still uses a RemoteOK listing URL. Prepare form will be blocked until you switch it to a direct company or ATS apply URL.</p>` : ""}
           <div class="actions">
             <button class="btn primary" onclick="selectApplication(${app.id})">Edit</button>
+            <button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>
+            <button class="btn" onclick="resumeApplicationCard(${app.id})">Resume form</button>
             ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">Open job</a>` : ""}
             <a class="btn" href="${mailto(app)}">Email draft</a>
           </div>
@@ -8744,6 +8765,18 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
     async function prepareApplicationFromDashboard(id) {
       selectApplication(id, false);
       await prepareApplicationForm();
+      showTab("applications");
+    }
+
+    async function prepareApplicationCard(id) {
+      selectApplication(id, false);
+      await prepareApplicationForm();
+      showTab("applications");
+    }
+
+    async function resumeApplicationCard(id) {
+      selectApplication(id, false);
+      await resumeApplicationForm();
       showTab("applications");
     }
 
