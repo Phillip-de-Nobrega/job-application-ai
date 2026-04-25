@@ -215,7 +215,7 @@ The generated checklist is stored at `AUTOMATION_CHECKLIST.md`. The weekly repor
 
 The Applications tab includes **Prepare form**. It creates a local task, opens a visible Playwright browser, fills clear fields, uploads the CV where it can identify a file upload, and then stops for manual review. It never clicks final submit.
 
-The Playwright browser uses a persistent local profile under `data/playwright-profile`, so manual logins can be reused where a site allows it.
+The Playwright browser saves reusable session state under `data/playwright-storage-state.json`, so manual logins can be reused where a site allows it.
 
 Use **Run form-fill smoke test** in the Applications tab to open a fake local application form and check that the filler works before trying a real job site.
 

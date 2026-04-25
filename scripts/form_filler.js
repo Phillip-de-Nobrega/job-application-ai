@@ -26,6 +26,10 @@ function shortText(value, limit = 160) {
   return clean.length > limit ? `${clean.slice(0, limit - 1)}...` : clean;
 }
 
+function normalizePromptKey(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 function ensureDir(filePath) {
   if (!filePath) return;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -318,6 +322,30 @@ async function clickApplyIfPresent(page, report, platform) {
       }
     } catch (error) {
       // Continue.
+    }
+  }
+  if (platform === "greenhouse") {
+    const greenhouseSelectors = [
+      'a[href="#app"]',
+      'a[href$="#app"]',
+      'a[id*="apply" i]',
+      'button[id*="apply" i]',
+      'a[href*="/application" i]',
+      'a[data-mapped="true"]'
+    ];
+    for (const selector of greenhouseSelectors) {
+      try {
+        const locator = page.locator(selector).first();
+        if (await locator.count()) {
+          page = await clickAndFollow(page, locator, report);
+          report.clicked_apply = true;
+          pushUnique(report.visited_urls, page.url());
+          console.log("clicked greenhouse apply fallback");
+          return page;
+        }
+      } catch (error) {
+        // Continue.
+      }
     }
   }
   if (platform === "ashby") {
@@ -657,6 +685,14 @@ function answerForCategory(category, field, task) {
   const profile = task.profile || {};
   const app = task.application || {};
   const name = splitName(profile.full_name);
+  const override = findPromptOverride(field, task);
+  if (override) {
+    return {
+      value: override,
+      review: true,
+      reason: "Saved manual override from the in-app field review."
+    };
+  }
   if (category === "first_name") return { value: name.first };
   if (category === "last_name") return { value: name.last };
   if (category === "full_name") return { value: profile.full_name };
@@ -716,6 +752,26 @@ function answerForCategory(category, field, task) {
   return { value: "" };
 }
 
+function findPromptOverride(field, task) {
+  const overrides = task.application?.form_prep_overrides || {};
+  if (!overrides || typeof overrides !== "object") return "";
+  const candidates = [
+    field.prompt,
+    shortText(field.prompt || "", 220),
+    `${field.prompt || ""} ${field.name || ""}`.trim(),
+    field.name,
+    field.id
+  ].map(normalizePromptKey).filter(Boolean);
+  for (const [rawKey, rawValue] of Object.entries(overrides)) {
+    const key = normalizePromptKey(rawKey);
+    if (!key) continue;
+    if (candidates.includes(key) || candidates.some(candidate => candidate && (candidate.startsWith(key) || key.startsWith(candidate)))) {
+      return String(rawValue || "");
+    }
+  }
+  return "";
+}
+
 async function fillLocatorFromScan(locator, field, answer, report) {
   const choice = answer.choice || answer.value || "";
   if (!choice) return false;
@@ -761,6 +817,7 @@ async function fillScannedFields(page, task, report, stepLabel = "step-1") {
     prompt: shortText(field.prompt || field.name || field.id || "", 220),
     type: field.type,
     tag: field.tag,
+    category: classifyField(field),
     required: Boolean(field.required),
     step: stepLabel,
     options: (field.options || []).slice(0, 8)

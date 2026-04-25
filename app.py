@@ -861,6 +861,7 @@ def init_db() -> None:
                 follow_up text not null default '',
                 next_follow_up text not null default '',
                 follow_up_sent_at text not null default '',
+                form_prep_overrides text not null default '',
                 form_prep_report_path text not null default '',
                 form_prep_screenshot_path text not null default '',
                 form_prep_task_path text not null default '',
@@ -1021,6 +1022,7 @@ def init_db() -> None:
         ensure_column(conn, "applications", "checklist", "text not null default ''")
         ensure_column(conn, "applications", "truthfulness_flags", "text not null default ''")
         ensure_column(conn, "applications", "recommended_cv_version", "text not null default ''")
+        ensure_column(conn, "applications", "form_prep_overrides", "text not null default ''")
         ensure_column(conn, "applications", "form_prep_report_path", "text not null default ''")
         ensure_column(conn, "applications", "form_prep_screenshot_path", "text not null default ''")
         ensure_column(conn, "applications", "form_prep_task_path", "text not null default ''")
@@ -4635,6 +4637,25 @@ def form_prep_report_for_app(application: dict[str, Any]) -> dict[str, Any] | No
     return report
 
 
+def parse_form_prep_overrides(raw: str) -> dict[str, str]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    result: dict[str, str] = {}
+    for key, value in payload.items():
+        clean_key = normalize_space(str(key))
+        if not clean_key:
+            continue
+        result[clean_key] = str(value or "")
+    return result
+
+
 def import_target_companies(conn: sqlite3.Connection, text: str) -> dict[str, Any]:
     ids: list[int] = []
     skipped: list[str] = []
@@ -5291,6 +5312,7 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
             "contact_name": app.get("contact_name", ""),
             "research_notes": app.get("research_notes", ""),
             "company_notes": app.get("company_notes", ""),
+            "form_prep_overrides": parse_form_prep_overrides(str(app.get("form_prep_overrides", ""))),
         },
         "site_credential": {
             "domain": credential.get("domain", ""),
@@ -5919,6 +5941,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         "research_sources",
                         "follow_up",
                         "next_follow_up",
+                        "form_prep_overrides",
                     ]
                     updates = {field: str(data.get(field, "")) for field in fields if field in data}
                     if updates.get("status") == "submitted" and not updates.get("next_follow_up"):
@@ -6383,6 +6406,7 @@ def get_state() -> dict[str, Any]:
             report = form_prep_report_for_app(app)
             if report:
                 app["form_prep_report"] = report
+            app["form_prep_overrides_map"] = parse_form_prep_overrides(str(app.get("form_prep_overrides", "")))
         leads = [
             row_to_dict(row)
             for row in conn.execute("select * from company_leads order by updated_at desc, created_at desc").fetchall()
@@ -7998,6 +8022,58 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       return `<ul>${items.slice(0, 8).map(item => `<li>${escapeHtml(item.prompt || item.label || item.name || item.reason || "Unnamed field")}${item.value_preview ? ` - ${escapeHtml(item.value_preview)}` : ""}</li>`).join("")}</ul>`;
     }
 
+    function formPrepOverrideTargets(app) {
+      const report = app.form_prep_report || {};
+      const overrides = app.form_prep_overrides_map || {};
+      const items = [];
+      const seen = new Set();
+      function push(item, source) {
+        const prompt = String(item?.prompt || "").trim();
+        if (!prompt || seen.has(prompt)) return;
+        const category = String(item?.category || "");
+        if (source === "scanned" && !["custom_question", "work_authorization", "salary", "availability", "motivation", "cover_letter"].includes(category)) return;
+        seen.add(prompt);
+        items.push({
+          prompt,
+          category,
+          source,
+          reason: String(item?.reason || ""),
+          value_preview: String(item?.value_preview || ""),
+          current: String(overrides[prompt] || "")
+        });
+      }
+      (report.review_fields || []).forEach(item => push(item, "review"));
+      (report.skipped_fields || []).forEach(item => push(item, "skipped"));
+      (report.scanned_fields || []).forEach(item => push(item, "scanned"));
+      return items;
+    }
+
+    function formPrepOverridesEditor(app) {
+      const items = formPrepOverrideTargets(app);
+      if (!items.length) return `<p class="muted">No field-level overrides available yet. Run Prepare form first.</p>`;
+      return items.slice(0, 12).map(item => `
+        <div class="panel" style="margin:10px 0">
+          <label>${escapeHtml(item.prompt)}</label>
+          <p class="muted">
+            ${escapeHtml([item.category || "field", item.source].filter(Boolean).join(" - "))}
+            ${item.reason ? `<br>${escapeHtml(item.reason)}` : ""}
+            ${item.value_preview && !item.current ? `<br>Last value: ${escapeHtml(item.value_preview)}` : ""}
+          </p>
+          <textarea class="form-prep-override" data-prompt="${escapeAttr(item.prompt)}" data-category="${escapeAttr(item.category || "")}" placeholder="Leave blank to keep the automatic answer.">${escapeHtml(item.current)}</textarea>
+        </div>
+      `).join("");
+    }
+
+    function collectFormPrepOverrides() {
+      const result = {};
+      document.querySelectorAll(".form-prep-override").forEach(el => {
+        const prompt = String(el.dataset.prompt || "").trim();
+        const value = String(el.value || "").trim();
+        if (prompt && value) result[prompt] = value;
+      });
+      return JSON.stringify(result);
+    }
+
     function formPrepSummary(app) {
       const report = app.form_prep_report || {};
       if (!report || !Object.keys(report).length) {
@@ -8032,6 +8108,10 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         <details>
           <summary>Filled fields</summary>
           ${prepList(report.filled_fields, "No filled fields saved.")}
+        </details>
+        <details>
+          <summary>Field overrides for next run</summary>
+          ${formPrepOverridesEditor(app)}
         </details>
         ${report.errors?.length ? `<details><summary>Errors</summary><pre>${escapeHtml((report.errors || []).join("\\n"))}</pre></details>` : ""}
       `;
@@ -8657,7 +8737,8 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         cover_letter: document.getElementById("edit_cover_letter").value,
         cv_notes: document.getElementById("edit_cv_notes").value,
         answers: document.getElementById("edit_answers").value,
-        follow_up: document.getElementById("edit_follow_up").value
+        follow_up: document.getElementById("edit_follow_up").value,
+        form_prep_overrides: collectFormPrepOverrides()
       };
       await api("/api/applications/save", {method: "POST", body: JSON.stringify(payload)});
       message("Application saved and documents regenerated.");
