@@ -658,6 +658,24 @@ async function hasVisibleApplicationFields(page) {
   };
 }
 
+async function waitForRenderableForm(page, platform, report) {
+  const maxAttempts = ["ashby", "greenhouse", "lever", "smartrecruiters", "workable", "teamtailor"].includes(platform || "") ? 6 : 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const visibility = await hasVisibleApplicationFields(page);
+    if (visibility.hasFields || visibility.fields.length) return visibility.fields;
+    await page.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(1000 + attempt * 400).catch(() => {});
+  }
+  if (report && ["ashby", "greenhouse", "lever", "smartrecruiters", "workable", "teamtailor"].includes(platform || "")) {
+    record(report.review_fields, {
+      prompt: "Form render wait",
+      reason: "The application page stayed in a loading or blank state during scanning. Retry Prepare form if fields do not appear."
+    });
+  }
+  return [];
+}
+
 function classifyField(field) {
   const text = `${field.prompt || ""} ${field.name || ""} ${field.id || ""} ${field.placeholder || ""}`.toLowerCase();
   if (/\b(first name|given name)\b/.test(text)) return "first_name";
@@ -812,7 +830,10 @@ async function fillLocatorFromScan(locator, field, answer, report) {
 }
 
 async function fillScannedFields(page, task, report, stepLabel = "step-1") {
-  const fields = await scanVisibleFields(page);
+  let fields = await scanVisibleFields(page);
+  if (!fields.length) {
+    fields = await waitForRenderableForm(page, report.platform || "", report);
+  }
   const scanned = fields.map(field => ({
     prompt: shortText(field.prompt || field.name || field.id || "", 220),
     type: field.type,
