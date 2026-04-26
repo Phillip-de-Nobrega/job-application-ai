@@ -63,6 +63,16 @@ DEFAULT_PROFILE: dict[str, str] = {
     "email": "Phillip2002@mweb.co.za",
     "phone": "+27 71 643 0185",
     "location": "Cape Town, South Africa",
+    "street_address": "4 Hauptville Circle",
+    "suburb": "Constantia",
+    "city": "Cape Town",
+    "region": "Western Cape",
+    "postcode": "7806",
+    "country": "South Africa",
+    "headshot_path": "",
+    "current_employer": "",
+    "current_job_title": "",
+    "drivers_license": "",
     "cv_path": CV_PATH,
     "cv_text": "",
     "portfolio_url": "",
@@ -2334,6 +2344,76 @@ def shortlist_top_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, An
     return {"count": len(ids), "ids": ids}
 
 
+def shortlist_fresh_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, Any]:
+    conn.execute(
+        "update jobs set status='new', updated_at=? where status='shortlisted'",
+        (now_iso(),),
+    )
+    rows = conn.execute(
+        """
+        select jobs.id, jobs.company, jobs.title, jobs.score
+        from jobs
+        left join applications on applications.job_id = jobs.id
+        where jobs.status in ('new', 'drafted', 'shortlisted')
+          and applications.id is null
+          and coalesce(jobs.too_senior, 0) = 0
+          and jobs.score >= 35
+          and lower(jobs.concerns) not like '%role-title mismatch%'
+          and lower(jobs.concerns) not like '%potential scam%'
+          and lower(jobs.concerns) not like '%below the r22,000/month target%'
+          and lower(jobs.concerns) not like '%outside south africa/uk/remote target%'
+          and lower(jobs.concerns) not like '%outside cape town%'
+          and lower(jobs.concerns) not like '%not clearly cape town or remote%'
+          and lower(jobs.concerns) not like '%cape town/remote preference%'
+          and lower(jobs.concerns) not like '%cape town/remote target%'
+          and lower(jobs.concerns) not like '%physical location is not cape town%'
+          and lower(jobs.concerns) not like '%listed physical location is not cape town%'
+          and lower(jobs.concerns) not like '%remote role appears based%'
+          and lower(jobs.concerns) not like '%remote role is tied to a specific city/country%'
+          and lower(jobs.concerns) not like '%remote role appears restricted%'
+          and lower(jobs.concerns) not like '%remote role text suggests geographic restrictions%'
+          and lower(jobs.concerns) not like '%marked this role as too senior%'
+          and lower(jobs.concerns) not like '%would require relocation%'
+          and lower(jobs.concerns) not like '%local/eu work authorization%'
+          and lower(jobs.concerns) not like '%us non-remote%'
+          and lower(jobs.concerns) not like '%hybrid role may require%'
+        order by
+          (jobs.score
+            + case when lower(jobs.location) like '%cape town%' or lower(jobs.location) like '%western cape%' then 6 else 0 end
+            - case when lower(jobs.concerns) like '%manager title may be above graduate/junior level%' then 4 else 0 end
+            - case when lower(jobs.concerns) like '%possible seniority mismatch%' then 8 else 0 end
+          ) desc,
+          case when lower(jobs.location) like '%cape town%' or lower(jobs.location) like '%western cape%' then 1 else 0 end desc,
+          case when lower(jobs.location) like '%remote%' then 1 else 0 end desc,
+          jobs.score desc,
+          jobs.updated_at desc
+        limit ?
+        """,
+        (max(limit * 5, limit),),
+    ).fetchall()
+    ids: list[int] = []
+    seen_roles: set[tuple[str, str]] = set()
+    for row in rows:
+        key = (
+            re.sub(r"\W+", " ", str(row["company"] or "").lower()).strip(),
+            re.sub(r"\W+", " ", str(row["title"] or "").lower()).strip(),
+        )
+        if key in seen_roles:
+            continue
+        seen_roles.add(key)
+        ids.append(int(row["id"]))
+        if len(ids) >= limit:
+            break
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(
+            f"update jobs set status='shortlisted', updated_at=? where id in ({placeholders})",
+            [now_iso()] + ids,
+        )
+        conn.commit()
+    return {"count": len(ids), "ids": ids}
+
+
 def rescore_all_jobs(conn: sqlite3.Connection) -> dict[str, Any]:
     rows = conn.execute("select * from jobs").fetchall()
     timestamp = now_iso()
@@ -2380,6 +2460,20 @@ def run_daily_workflow(limit: int = 5) -> dict[str, Any]:
         assessed = assess_application_queue(conn)
     return {
         "discovery": discovery,
+        "rescored": rescored,
+        "shortlisted": shortlisted,
+        "drafts": drafts,
+        "assessed": assessed,
+    }
+
+
+def refresh_application_queue(limit: int = 5) -> dict[str, Any]:
+    with connect() as conn:
+        rescored = rescore_all_jobs(conn)
+        shortlisted = shortlist_fresh_jobs(conn, limit)
+        drafts = generate_drafts_for_jobs(conn, "shortlisted", limit)
+        assessed = assess_application_queue(conn)
+    return {
         "rescored": rescored,
         "shortlisted": shortlisted,
         "drafts": drafts,
@@ -3486,6 +3580,17 @@ def detect_application_platform(url: str, source: str = "") -> str:
     return "custom"
 
 
+MANUAL_FIRST_PLATFORMS = {"smartrecruiters", "workday"}
+DOMAIN_RESTRICTION_COOLDOWN_HOURS = {
+    "smartrecruiters": 12,
+    "workday": 12,
+    "greenhouse": 6,
+    "lever": 6,
+    "ashby": 6,
+    "default": 6,
+}
+
+
 def looks_like_generic_careers_link(url: str, anchor: str) -> bool:
     cleaned_anchor = normalize_space(anchor).lower().strip(" .:-")
     title = title_from_url(url).lower().strip(" .:-")
@@ -4427,6 +4532,81 @@ def domain_variants_for_url(url: str) -> list[str]:
     return unique
 
 
+def parse_iso_datetime(value: str) -> dt.datetime | None:
+    text = normalize_space(value)
+    if not text:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed
+
+
+def cooldown_hours_for_platform(platform: str) -> int:
+    key = normalize_space(platform).lower()
+    return int(DOMAIN_RESTRICTION_COOLDOWN_HOURS.get(key, DOMAIN_RESTRICTION_COOLDOWN_HOURS["default"]))
+
+
+def active_domain_blockers(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    now = dt.datetime.now(dt.timezone.utc)
+    blockers: dict[str, dict[str, Any]] = {}
+    rows = conn.execute(
+        """
+        select applications.id as application_id, applications.form_prep_report_path,
+               applications.updated_at as application_updated_at,
+               jobs.company, jobs.title, jobs.url, jobs.source
+        from applications
+        join jobs on jobs.id = applications.job_id
+        where applications.form_prep_report_path != ''
+        order by applications.updated_at desc
+        """
+    ).fetchall()
+    for row in rows:
+        app = row_to_dict(row) or {}
+        url = str(app.get("url", ""))
+        domain = normalize_domain(url)
+        if not domain or domain in blockers:
+            continue
+        report = read_json_file(str(app.get("form_prep_report_path", "")))
+        if not isinstance(report, dict):
+            continue
+        blocker = report.get("blocker") or {}
+        if str(blocker.get("kind", "")) != "platform-restriction":
+            continue
+        blocked_until = parse_iso_datetime(str(blocker.get("blocked_until", "")))
+        if not blocked_until or blocked_until <= now:
+            continue
+        platform = str(report.get("platform") or detect_application_platform(url, str(app.get("source", ""))))
+        blockers[domain] = {
+            "domain": domain,
+            "platform": platform,
+            "company": str(app.get("company", "")),
+            "title": str(app.get("title", "")),
+            "application_id": int(app.get("application_id") or 0),
+            "url": url,
+            "message": str(blocker.get("message", "")),
+            "blocked_until": blocked_until.isoformat(),
+            "cooldown_hours": cooldown_hours_for_platform(platform),
+            "manual_first": platform in MANUAL_FIRST_PLATFORMS,
+        }
+    return list(blockers.values())
+
+
+def active_domain_blocker_for_url(conn: sqlite3.Connection, url: str) -> dict[str, Any] | None:
+    variants = domain_variants_for_url(url)
+    if not variants:
+        return None
+    for blocker in active_domain_blockers(conn):
+        domain = normalize_domain(str(blocker.get("domain", "")))
+        for variant in variants:
+            if domain and (variant == domain or variant.endswith(f".{domain}") or domain.endswith(f".{variant}")):
+                return blocker
+    return None
+
+
 def keychain_service_name(domain: str) -> str:
     normalized = normalize_domain(domain)
     if not normalized:
@@ -5157,8 +5337,92 @@ def safe_filename(value: str) -> str:
     return value.strip("-")[:120] or "application"
 
 
+def application_documents_folder(job: dict[str, Any]) -> Path:
+    return DOCS_DIR / f"{safe_filename(str(job.get('company', 'company')))}-{safe_filename(str(job.get('title', 'role')))}-{job.get('id')}"
+
+
+def rtf_escape(value: str) -> str:
+    text = str(value or "")
+    text = text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text.replace("\n", r"\par" + "\n")
+
+
+def render_cover_letter_rtf(job: dict[str, Any], application: dict[str, Any]) -> str:
+    title = normalize_space(str(job.get("title", ""))) or "Role"
+    company = normalize_space(str(job.get("company", ""))) or "Company"
+    body = str(application.get("cover_letter", "") or "").strip()
+    return (
+        "{\\rtf1\\ansi\\deff0\n"
+        "{\\fonttbl{\\f0 Arial;}}\n"
+        "\\fs24\n"
+        f"Phillip de Nobrega\\par\n"
+        f"Application for {rtf_escape(title)} at {rtf_escape(company)}\\par\n"
+        "\\par\n"
+        f"{rtf_escape(body)}\n"
+        "}\n"
+    )
+
+
+def render_supporting_statement_text(job: dict[str, Any], application: dict[str, Any]) -> str:
+    title = normalize_space(str(job.get("title", ""))) or "the role"
+    company = normalize_space(str(job.get("company", ""))) or "the company"
+    cover = normalize_space(str(application.get("cover_letter", "") or ""))
+    answers = normalize_space(str(application.get("answers", "") or ""))
+    research = normalize_space(str(application.get("research_notes", "") or ""))
+    parts = [
+        f"Supporting Statement for {title} at {company}",
+        "",
+        cover,
+    ]
+    if answers:
+        parts.extend(["", "Additional application context:", answers])
+    if research:
+        parts.extend(["", "Company-specific focus:", research])
+    return "\n".join(part for part in parts if part is not None).strip()
+
+
+def render_supporting_statement_rtf(job: dict[str, Any], application: dict[str, Any]) -> str:
+    body = render_supporting_statement_text(job, application)
+    return (
+        "{\\rtf1\\ansi\\deff0\n"
+        "{\\fonttbl{\\f0 Arial;}}\n"
+        "\\fs24\n"
+        f"{rtf_escape(body)}\n"
+        "}\n"
+    )
+
+
+def build_application_artifacts(job: dict[str, Any], application: dict[str, Any], profile: dict[str, Any]) -> dict[str, str]:
+    folder = application_documents_folder(job)
+    artifacts: dict[str, str] = {}
+    cv_path = str(profile.get("cv_path", "") or "").strip()
+    headshot_path = str(profile.get("headshot_path", "") or "").strip()
+    if cv_path:
+        artifacts["cv_upload"] = cv_path
+        artifacts["resume"] = cv_path
+    if headshot_path:
+        artifacts["headshot"] = headshot_path
+        artifacts["photo"] = headshot_path
+    artifact_files = {
+        "cover_letter": folder / "cover-letter.rtf",
+        "motivation_letter": folder / "cover-letter.rtf",
+        "supporting_statement": folder / "supporting-statement.rtf",
+        "personal_statement": folder / "supporting-statement.rtf",
+        "questionnaire_answers": folder / "questionnaire-answers.txt",
+        "additional_information": folder / "questionnaire-answers.txt",
+        "company_research": folder / "company-research.txt",
+        "application_pack": folder / "application-pack.html",
+        "tailored_cv_brief": folder / "tailored-cv-brief.html",
+    }
+    for key, artifact_path in artifact_files.items():
+        if artifact_path.exists():
+            artifacts[key] = str(artifact_path)
+    return artifacts
+
+
 def write_application_documents(job: dict[str, Any], application: dict[str, Any]) -> None:
-    folder = DOCS_DIR / f"{safe_filename(str(job.get('company', 'company')))}-{safe_filename(str(job.get('title', 'role')))}-{job.get('id')}"
+    folder = application_documents_folder(job)
     folder.mkdir(parents=True, exist_ok=True)
     tailored_cv = render_tailored_cv_text(job, application)
     parts = {
@@ -5174,6 +5438,8 @@ def write_application_documents(job: dict[str, Any], application: dict[str, Any]
     }
     for filename, body in parts.items():
         (folder / filename).write_text(body, encoding="utf-8")
+    (folder / "cover-letter.rtf").write_text(render_cover_letter_rtf(job, application), encoding="utf-8")
+    (folder / "supporting-statement.rtf").write_text(render_supporting_statement_rtf(job, application), encoding="utf-8")
     html_doc = render_printable_application(job, application)
     (folder / "application-pack.html").write_text(html_doc, encoding="utf-8")
     (folder / "tailored-cv-brief.html").write_text(render_tailored_cv_html(job, application, tailored_cv), encoding="utf-8")
@@ -5282,8 +5548,17 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
             "This job still points to a RemoteOK listing page, which is blocking direct form preparation behind signup/CAPTCHA. "
             "Use a direct company/ATS apply URL first, then prepare the form from that real application page."
         )
+    active_blocker = active_domain_blocker_for_url(conn, str(job.get("url", "")))
+    if active_blocker:
+        raise RuntimeError(
+            f"{active_blocker.get('domain', 'This ATS domain')} is in cooldown until {active_blocker.get('blocked_until', '')} "
+            f"after a platform restriction page. Wait for the cooldown to clear, then retry manually."
+        )
 
     write_application_documents(job, app)
+    docs_folder = application_documents_folder(job)
+    cover_letter_file_path = docs_folder / "cover-letter.rtf"
+    artifacts = build_application_artifacts(job, app, profile)
     timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     report_path = FORM_PREP_DIR / f"application-{app_id}-{timestamp}.report.json"
     screenshot_path = FORM_PREP_DIR / f"application-{app_id}-{timestamp}.png"
@@ -5313,6 +5588,8 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
             "research_notes": app.get("research_notes", ""),
             "company_notes": app.get("company_notes", ""),
             "form_prep_overrides": parse_form_prep_overrides(str(app.get("form_prep_overrides", ""))),
+            "cover_letter_file_path": str(cover_letter_file_path),
+            "artifacts": artifacts,
         },
         "site_credential": {
             "domain": credential.get("domain", ""),
@@ -5326,6 +5603,9 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
         "rules": {
             "final_submit": "Never click final submit. Stop for user review.",
             "captcha": "Do not bypass CAPTCHA, MFA, login challenges, rate limits, or anti-bot systems.",
+        },
+        "site_policy": {
+            "manual_first": detect_application_platform(str(job.get("url", "")), str(job.get("source", ""))) in MANUAL_FIRST_PLATFORMS,
         },
     }
     task_path = TASK_DIR / f"application-{app_id}-{dt.datetime.now().strftime('%Y%m%d%H%M%S')}.json"
@@ -5910,6 +6190,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 with connect() as conn:
                     result = shortlist_top_jobs(conn, limit)
                 self.json({"ok": True, **result})
+            elif parsed.path == "/api/applications/refresh-queue":
+                limit = int(data.get("limit") or 5)
+                result = refresh_application_queue(limit)
+                self.json({"ok": True, **result})
             elif parsed.path == "/api/jobs/rescore":
                 with connect() as conn:
                     result = rescore_all_jobs(conn)
@@ -6407,6 +6691,9 @@ def get_state() -> dict[str, Any]:
             if report:
                 app["form_prep_report"] = report
             app["form_prep_overrides_map"] = parse_form_prep_overrides(str(app.get("form_prep_overrides", "")))
+            app["platform"] = detect_application_platform(str(app.get("url", "")), str(app.get("source", "")))
+            app["manual_first"] = app["platform"] in MANUAL_FIRST_PLATFORMS
+        blocked_domains = active_domain_blockers(conn)
         leads = [
             row_to_dict(row)
             for row in conn.execute("select * from company_leads order by updated_at desc, created_at desc").fetchall()
@@ -6488,6 +6775,7 @@ def get_state() -> dict[str, Any]:
         "inbox": inbox_config_status(),
         "inbox_messages": inbox_messages,
         "site_credentials": site_credentials,
+        "blocked_domains": blocked_domains,
         "session_memory": read_session_memory(),
     }
 
@@ -6777,8 +7065,18 @@ INDEX_HTML = r"""<!doctype html>
           <div><label>Email</label><input id="profile_email"></div>
           <div><label>Phone</label><input id="profile_phone"></div>
           <div><label>Location</label><input id="profile_location"></div>
+          <div><label>Street address</label><input id="profile_street_address"></div>
+          <div><label>Suburb</label><input id="profile_suburb"></div>
+          <div><label>City</label><input id="profile_city"></div>
+          <div><label>Province / region</label><input id="profile_region"></div>
+          <div><label>Postcode</label><input id="profile_postcode"></div>
+          <div><label>Country</label><input id="profile_country"></div>
           <div><label>LinkedIn URL</label><input id="profile_linkedin_url"></div>
           <div><label>Portfolio URL</label><input id="profile_portfolio_url"></div>
+          <div><label>Headshot path</label><input id="profile_headshot_path" placeholder="/Users/phillip/Desktop/..."></div>
+          <div><label>Current employer</label><input id="profile_current_employer"></div>
+          <div><label>Current job title</label><input id="profile_current_job_title"></div>
+          <div><label>Driver's license</label><input id="profile_drivers_license" placeholder="Yes / No"></div>
         </div>
         <label>CV path</label><input id="profile_cv_path">
         <label>CV/profile text</label><textarea id="profile_cv_text" style="min-height:220px"></textarea>
@@ -7009,8 +7307,18 @@ INDEX_HTML = r"""<!doctype html>
           <div class="panel">
             <h2>Application Drafts</h2>
             <p class="muted">Use `Prepare form` on any draft card below to open the live application page in a visible browser. You can also open a draft first and use the same action in the editor.</p>
+            <div id="applicationDomainBlocks"></div>
             <div class="actions">
+              <button class="btn primary" onclick="refreshApplicationQueue()">Refresh with new options</button>
               <button class="btn" onclick="runFormFillSmokeTest()">Run form-fill smoke test</button>
+            </div>
+            <div class="actions">
+              <label for="application_view_mode" style="margin:0">View</label>
+              <select id="application_view_mode" onchange="renderApplications()">
+                <option value="current">Current batch</option>
+                <option value="active">Active only</option>
+                <option value="all">All</option>
+              </select>
             </div>
             <div id="applicationList"></div>
           </div>
@@ -7248,7 +7556,8 @@ Record:
     let selectedTarget = null;
 
     const profileKeys = [
-      "full_name", "email", "phone", "location", "cv_path", "cv_text",
+      "full_name", "email", "phone", "location", "street_address", "suburb", "city", "region", "postcode", "country",
+      "headshot_path", "current_employer", "current_job_title", "drivers_license", "cv_path", "cv_text",
       "portfolio_url", "linkedin_url", "target_roles", "preferred_industries",
       "target_locations", "work_authorization", "salary_expectation",
       "salary_target_zar_monthly", "availability", "notice_period", "relocation",
@@ -7467,6 +7776,36 @@ Record:
     function formatDate(dateText) {
       if (!dateText) return "";
       return dateText;
+    }
+
+    function domainFromUrl(url) {
+      try {
+        return new URL(url).hostname.replace(/^www\./, "");
+      } catch (error) {
+        return "";
+      }
+    }
+
+    function activeBlockedDomain(url) {
+      const domain = domainFromUrl(url);
+      if (!domain) return null;
+      return (state.blocked_domains || []).find(item => {
+        const blocked = String(item.domain || "");
+        return blocked && (domain === blocked || domain.endsWith(`.${blocked}`) || blocked.endsWith(`.${domain}`));
+      }) || null;
+    }
+
+    function blockedDomainSummaryHtml() {
+      const items = state.blocked_domains || [];
+      if (!items.length) return `<p class="muted">No ATS cooldowns are active.</p>`;
+      return items.map(item => `
+        <div class="reminder">
+          <h3>${escapeHtml(item.domain || "Blocked ATS")}</h3>
+          <div class="meta">${escapeHtml(item.platform || "platform")} - until ${escapeHtml(item.blocked_until || "")}</div>
+          <p class="bad">${escapeHtml(item.message || "Platform restriction detected.")}</p>
+          <p class="muted">${escapeHtml(item.company || "")}${item.title ? ` - ${escapeHtml(item.title)}` : ""}</p>
+        </div>
+      `).join("");
     }
 
     function renderEmail() {
@@ -7910,15 +8249,33 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
 
     function renderApplications() {
       const list = document.getElementById("applicationList");
-      list.innerHTML = state.applications.map(app => `
+      const blockedTarget = document.getElementById("applicationDomainBlocks");
+      const viewMode = document.getElementById("application_view_mode")?.value || "current";
+      const completedStatuses = new Set(["submitted", "interview", "offer", "rejected"]);
+      const activeApps = (state.applications || []).filter(app => !completedStatuses.has(String(app.status || "draft")));
+      const visibleApps = viewMode === "all"
+        ? (state.applications || [])
+        : viewMode === "active"
+          ? activeApps
+          : activeApps.slice(0, 5);
+      if (blockedTarget) {
+        const items = state.blocked_domains || [];
+        blockedTarget.innerHTML = items.length
+          ? `<div class="notice bad"><strong>ATS cooldowns active.</strong><br>These domains recently showed restriction pages and will be blocked from Prepare form until their cooldown expires.</div>${blockedDomainSummaryHtml()}`
+          : "";
+      }
+      list.innerHTML = visibleApps.map(app => `
         <div class="panel">
           <h3>${escapeHtml(app.title)}</h3>
           <div class="meta">${escapeHtml(app.company)} - ${escapeHtml(followUpLabel(app))}</div>
           <div class="meta">${escapeHtml(contactSummary(app))}</div>
+          ${activeBlockedDomain(app.url) ? `<p class="bad">Prepare form is paused for ${escapeHtml(activeBlockedDomain(app.url).domain || "this ATS")} until ${escapeHtml(activeBlockedDomain(app.url).blocked_until || "")}.</p>` : ""}
           <div>
             ${app.research_notes ? `<span class="tag">research saved</span>` : `<span class="tag">research needed</span>`}
             <span class="tag">quality ${escapeHtml(app.quality_score || 0)}</span>
             ${String(app.url || "").toLowerCase().includes("remoteok.com/remote-jobs/") ? `<span class="tag">board login wall</span>` : ""}
+            ${app.manual_first ? `<span class="tag">manual-first ATS</span>` : ""}
+            ${activeBlockedDomain(app.url) ? `<span class="tag">ats cooldown</span>` : ""}
             ${app.form_prep_started_at ? `<span class="tag">form prep ${escapeHtml(app.form_prep_report?.status || "started")}</span>` : ""}
             ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
           </div>
@@ -7931,7 +8288,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
             <a class="btn" href="${mailto(app)}">Email draft</a>
           </div>
         </div>
-      `).join("") || `<p class="muted">No application drafts yet.</p>`;
+      `).join("") || `<p class="muted">No application drafts in this view.</p>`;
       renderSiteCredentials();
       if (selectedApplication) selectApplication(selectedApplication.id, false);
     }
@@ -8094,6 +8451,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           Skipped: ${skippedCount} field(s)<br>
           Login: ${escapeHtml(login.status || "not attempted")}
           ${blocker.kind ? `<br>Waiting on you: ${escapeHtml(blocker.kind)}${blocker.message ? ` - ${escapeHtml(blocker.message)}` : ""}` : ""}
+          ${blocker.blocked_until ? `<br>Cooldown until: ${escapeHtml(blocker.blocked_until)}` : ""}
           ${report.last_url ? `<br>Current page: ${escapeHtml(report.last_url)}` : ""}
           ${app.form_prep_screenshot_path ? `<br>Screenshot: ${escapeHtml(app.form_prep_screenshot_path)}` : ""}
         </div>
@@ -8714,6 +9072,16 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       showTab("applications");
     }
 
+    async function refreshApplicationQueue() {
+      const result = await api("/api/applications/refresh-queue", {method: "POST", body: JSON.stringify({limit: 5})});
+      const shortlisted = result.shortlisted?.count || 0;
+      const drafted = result.drafts?.count || 0;
+      message(`Refreshed applications: ${shortlisted} jobs shortlisted, ${drafted} new draft${drafted === 1 ? "" : "s"} generated. Newest options appear first.`);
+      await load();
+      showTab("applications");
+      window.scrollTo({top: 0, behavior: "smooth"});
+    }
+
     async function generateApplication(job_id) {
       await api("/api/applications/generate", {method: "POST", body: JSON.stringify({job_id})});
       message("Application draft generated.");
@@ -8815,15 +9183,23 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
 
     async function prepareApplicationForm() {
       if (!selectedApplication) return;
-      await saveApplication();
-      const result = await api("/api/applications/prepare-form", {method: "POST", body: JSON.stringify({id: selectedApplication.id})});
-      message(`Visible browser launched for form preparation. Process ${result.pid}. If a CAPTCHA or MFA prompt appears, clear it in the browser and the run should continue. Use Resume form if you close the browser and need to restart from the saved task.`);
+      try {
+        await saveApplication();
+        const result = await api("/api/applications/prepare-form", {method: "POST", body: JSON.stringify({id: selectedApplication.id})});
+        message(`Visible browser launched for form preparation. Process ${result.pid}. If a CAPTCHA or MFA prompt appears, clear it in the browser and the run should continue. Use Resume form if you close the browser and need to restart from the saved task.`);
+      } catch (error) {
+        message(error.message || "Could not start form preparation.", "bad");
+      }
     }
 
     async function resumeApplicationForm() {
       if (!selectedApplication) return;
-      const result = await api("/api/applications/resume-form", {method: "POST", body: JSON.stringify({id: selectedApplication.id})});
-      message(`Form preparation resumed in a visible browser. Process ${result.pid}. If you cleared a challenge earlier, the saved session should carry forward.`);
+      try {
+        const result = await api("/api/applications/resume-form", {method: "POST", body: JSON.stringify({id: selectedApplication.id})});
+        message(`Form preparation resumed in a visible browser. Process ${result.pid}. If you cleared a challenge earlier, the saved session should carry forward.`);
+      } catch (error) {
+        message(error.message || "Could not resume form preparation.", "bad");
+      }
     }
 
     async function saveFormFillFeedback() {

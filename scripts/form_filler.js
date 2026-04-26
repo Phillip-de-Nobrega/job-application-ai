@@ -369,19 +369,31 @@ async function clickApplyIfPresent(page, report, platform) {
 async function fillProfileFields(page, task, report) {
   const profile = task.profile || {};
   const name = splitName(profile.full_name);
+  const fullAddress = [profile.street_address, profile.suburb, profile.city, profile.region, profile.postcode, profile.country].filter(Boolean).join(", ");
 
   await fillByLabels(page, [/\bfirst name\b/i, /\bgiven name\b/i], name.first, "first name", report);
   await fillByLabels(page, [/\blast name\b/i, /\bsurname\b/i, /\bfamily name\b/i], name.last, "last name", report);
   await fillByLabels(page, [/\bfull name\b/i, /^name$/i], profile.full_name, "full name", report);
   await fillByLabels(page, [/\bemail\b/i, /\be-mail\b/i], profile.email, "email", report);
   await fillByLabels(page, [/\bphone\b/i, /\bmobile\b/i, /\btelephone\b/i], profile.phone, "phone", report);
+  await fillByLabels(page, [/\bstreet address\b/i, /\baddress line 1\b/i, /^\s*address\s*$/i], profile.street_address, "street address", report);
+  await fillByLabels(page, [/\bsuburb\b/i, /\bdistrict\b/i, /\baddress line 2\b/i], profile.suburb, "suburb", report);
+  await fillByLabels(page, [/^\s*city\s*$/i, /\btown\b/i], profile.city, "city", report);
+  await fillByLabels(page, [/\bprovince\b/i, /\bregion\b/i, /\bstate\b/i, /\bcounty\b/i], profile.region, "region", report);
+  await fillByLabels(page, [/\bpostcode\b/i, /\bpostal code\b/i, /\bzip\b/i, /\bzip code\b/i], profile.postcode, "postcode", report);
+  await fillByLabels(page, [/\bcountry\b/i], profile.country, "country", report);
   await fillByLabels(page, [/\bcurrent location\b/i, /^location$/i, /^\s*city\s*$/i], profile.location, "location", report);
   await fillByLabels(page, [/linkedin/i, /linked in/i], profile.linkedin_url, "linkedin", report);
   await fillByLabels(page, [/\bportfolio\b/i, /\bwebsite\b/i], profile.portfolio_url || profile.linkedin_url, "portfolio/website", report);
+  await fillByLabels(page, [/\bcurrent company\b/i, /\bcurrent employer\b/i, /\bemployer\b/i], profile.current_employer, "current employer", report);
+  await fillByLabels(page, [/\bcurrent title\b/i, /\bjob title\b/i, /\bcurrent role\b/i], profile.current_job_title, "current job title", report);
 
   await fillByPlaceholders(page, [/\bemail\b/i, /\be-mail\b/i], profile.email, "email placeholder", report);
   await fillByPlaceholders(page, [/\bphone\b/i, /\bmobile\b/i], profile.phone, "phone placeholder", report);
   await fillByPlaceholders(page, [/linkedin/i], profile.linkedin_url, "linkedin placeholder", report);
+  await fillByPlaceholders(page, [/\baddress\b/i], fullAddress || profile.street_address, "address placeholder", report);
+  await fillByPlaceholders(page, [/\bcity\b/i], profile.city, "city placeholder", report);
+  await fillByPlaceholders(page, [/\bpostcode\b/i, /\bpostal code\b/i, /\bzip\b/i], profile.postcode, "postcode placeholder", report);
 
   await fillBySelectors(page, [
     'input[name="first_name"]',
@@ -431,12 +443,68 @@ async function fillProfileFields(page, task, report) {
     'input[name*="urls" i]',
     'input[id*="urls" i]'
   ], profile.linkedin_url, "linkedin selector", report);
+  await fillBySelectors(page, [
+    'input[name*="address" i]',
+    'input[id*="address" i]',
+    'input[name*="street" i]',
+    'input[id*="street" i]'
+  ], profile.street_address || fullAddress, "address selector", report);
+  await fillBySelectors(page, [
+    'input[name*="suburb" i]',
+    'input[id*="suburb" i]'
+  ], profile.suburb, "suburb selector", report);
+  await fillBySelectors(page, [
+    'input[name*="city" i]',
+    'input[id*="city" i]',
+    'input[name*="town" i]',
+    'input[id*="town" i]'
+  ], profile.city, "city selector", report);
+  await fillBySelectors(page, [
+    'input[name*="region" i]',
+    'input[id*="region" i]',
+    'input[name*="province" i]',
+    'input[id*="province" i]',
+    'input[name*="state" i]',
+    'input[id*="state" i]'
+  ], profile.region, "region selector", report);
+  await fillBySelectors(page, [
+    'input[name*="postcode" i]',
+    'input[id*="postcode" i]',
+    'input[name*="postal" i]',
+    'input[id*="postal" i]',
+    'input[name*="zip" i]',
+    'input[id*="zip" i]'
+  ], profile.postcode, "postcode selector", report);
+  await fillBySelectors(page, [
+    'input[name*="country" i]',
+    'input[id*="country" i]'
+  ], profile.country, "country selector", report);
+  await fillBySelectors(page, [
+    'input[name*="employer" i]',
+    'input[id*="employer" i]',
+    'input[name*="company" i]',
+    'input[id*="company" i]'
+  ], profile.current_employer, "current employer selector", report);
+  await fillBySelectors(page, [
+    'input[name*="title" i]',
+    'input[id*="title" i]',
+    'input[name*="role" i]',
+    'input[id*="role" i]'
+  ], profile.current_job_title, "current job title selector", report);
   await selectFirstMatchingOption(page, [
     'select[name*="location" i]',
     'select[id*="location" i]',
     'select[name*="country" i]',
     'select[id*="country" i]'
-  ], "South Africa", "country/location", report);
+  ], profile.country || "South Africa", "country/location", report);
+  await selectFirstMatchingOption(page, [
+    'select[name*="region" i]',
+    'select[id*="region" i]',
+    'select[name*="province" i]',
+    'select[id*="province" i]',
+    'select[name*="state" i]',
+    'select[id*="state" i]'
+  ], profile.region || "Western Cape", "region/location", report);
 }
 
 function motivationText(task) {
@@ -543,6 +611,56 @@ async function uploadCv(page, task, report) {
     }
   }
   record(report.skipped_fields, { prompt: "CV upload", reason: "No file input found." });
+}
+
+async function uploadCoverLetter(page, task, report) {
+  const coverLetterPath = task.application && task.application.cover_letter_file_path;
+  if (!coverLetterPath || !fs.existsSync(coverLetterPath)) return;
+  const inputs = page.locator('input[type="file"]');
+  const count = await inputs.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    const input = inputs.nth(i);
+    try {
+      const meta = [
+        await input.getAttribute("name").catch(() => ""),
+        await input.getAttribute("id").catch(() => ""),
+        await input.getAttribute("aria-label").catch(() => ""),
+        await input.getAttribute("accept").catch(() => "")
+      ].join(" ").toLowerCase();
+      if (meta.includes("cover") || meta.includes("motivation") || meta.includes("supporting")) {
+        await input.setInputFiles(coverLetterPath, { timeout: 8000 });
+        record(report.filled_fields, { prompt: "Cover letter upload", value: path.basename(coverLetterPath), kind: "file" });
+        return;
+      }
+    } catch (error) {
+      record(report.skipped_fields, { prompt: "Cover letter upload", reason: error.message });
+    }
+  }
+}
+
+async function uploadHeadshot(page, task, report) {
+  const headshotPath = task.profile && task.profile.headshot_path;
+  if (!headshotPath || !fs.existsSync(headshotPath)) return;
+  const inputs = page.locator('input[type="file"]');
+  const count = await inputs.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    const input = inputs.nth(i);
+    try {
+      const meta = [
+        await input.getAttribute("name").catch(() => ""),
+        await input.getAttribute("id").catch(() => ""),
+        await input.getAttribute("aria-label").catch(() => ""),
+        await input.getAttribute("accept").catch(() => "")
+      ].join(" ").toLowerCase();
+      if (meta.includes("photo") || meta.includes("headshot") || meta.includes("avatar") || meta.includes("profile")) {
+        await input.setInputFiles(headshotPath, { timeout: 8000 });
+        record(report.filled_fields, { prompt: "Headshot upload", value: path.basename(headshotPath), kind: "file" });
+        return;
+      }
+    } catch (error) {
+      record(report.skipped_fields, { prompt: "Headshot upload", reason: error.message });
+    }
+  }
 }
 
 async function addReviewBanner(page, task) {
@@ -678,25 +796,76 @@ async function waitForRenderableForm(page, platform, report) {
 
 function classifyField(field) {
   const text = `${field.prompt || ""} ${field.name || ""} ${field.id || ""} ${field.placeholder || ""}`.toLowerCase();
-  if (/\b(first name|given name)\b/.test(text)) return "first_name";
-  if (/\b(last name|surname|family name)\b/.test(text)) return "last_name";
-  if (/\b(full name|candidate name)\b/.test(text) || /^name\b/.test(text)) return "full_name";
-  if (/\b(email|e-mail)\b/.test(text)) return "email";
-  if (/\b(phone|mobile|telephone|cell)\b/.test(text)) return "phone";
-  if (/linkedin/.test(text)) return "linkedin";
-  if (/\b(portfolio|website|personal site)\b/.test(text)) return "website";
-  if (/\b(current location|location|city|town|where are you based)\b/.test(text)) return "location";
-  if (/\bcountry\b/.test(text)) return "country";
-  if (/\b(cover letter|cover note|message to hiring|additional information)\b/.test(text)) return "cover_letter";
-  if (/(why.*(role|company|interested)|motivation|why do you want|why would you like)/.test(text)) return "motivation";
-  if (/\b(salary|compensation|pay expectation|rate)\b/.test(text)) return "salary";
-  if (/\b(availability|start date|notice period|when can you start)\b/.test(text)) return "availability";
-  if (/\b(work authorization|right to work|visa|sponsorship|authorized to work)\b/.test(text)) return "work_authorization";
-  if (/\breference/.test(text)) return "references";
-  if (/\b(gender|ethnicity|race|disability|veteran|demographic|sexual orientation)\b/.test(text)) return "demographics";
-  if (/\b(resume|cv|curriculum vitae)\b/.test(text)) return "cv_upload";
-  if (/\b(how many years|briefly describe|experience do you have|tell us about|share an example)\b/.test(text)) return "custom_question";
+  const normalized = text.replace(/[_-]+/g, " ");
+  if (/\b(first name|given name)\b/.test(normalized)) return "first_name";
+  if (/\b(last name|surname|family name)\b/.test(normalized)) return "last_name";
+  if (/\b(full name|candidate name)\b/.test(normalized) || /^name\b/.test(normalized)) return "full_name";
+  if (/\bemail\b/.test(normalized)) return "email";
+  if (/\b(phone|mobile|telephone|cell)\b/.test(normalized)) return "phone";
+  if (/linkedin/.test(normalized)) return "linkedin";
+  if (/\b(portfolio|website|personal site)\b/.test(normalized)) return "website";
+  if (/\b(street address|address line 1|address)\b/.test(normalized)) return "street_address";
+  if (/\b(suburb|district|address line 2)\b/.test(normalized)) return "suburb";
+  if (/\b(current location|location)\b/.test(normalized)) return "location";
+  if (/\b(city|town)\b/.test(normalized)) return "city";
+  if (/\b(region|province|state|county)\b/.test(normalized)) return "region";
+  if (/\b(postcode|postal code|zip|zip code)\b/.test(normalized)) return "postcode";
+  if (/\bcountry\b/.test(normalized)) return "country";
+  if (/\b(current employer|current company|employer)\b/.test(normalized)) return "current_employer";
+  if (/\b(current title|job title|current role)\b/.test(normalized)) return "current_job_title";
+  if (field.type === "file" && /\b(cover letter|cover note|motivation letter|supporting statement)\b/.test(normalized)) return "cover_letter_upload";
+  if (field.type === "file") return "file_upload";
+  if (/\b(cover letter|cover note|message to hiring|additional information|hiring manager message)\b/.test(normalized)) return "cover_letter";
+  if (/(why.*(role|company|interested)|motivation|why do you want|why would you like)/.test(normalized)) return "motivation";
+  if (/\b(salary|compensation|pay expectation|rate)\b/.test(normalized)) return "salary";
+  if (/\b(availability|start date|notice period|when can you start)\b/.test(normalized)) return "availability";
+  if (/\b(work authorization|right to work|visa|sponsorship|authorized to work)\b/.test(normalized)) return "work_authorization";
+  if (/\breference/.test(normalized)) return "references";
+  if (/\b(gender|ethnicity|race|disability|veteran|demographic|sexual orientation)\b/.test(normalized)) return "demographics";
+  if (/\b(photo|headshot|avatar|profile picture)\b/.test(normalized)) return "headshot_upload";
+  if (/\b(resume|cv|curriculum vitae)\b/.test(normalized)) return "cv_upload";
+  if (/\b(how many years|briefly describe|experience do you have|tell us about|share an example)\b/.test(normalized)) return "custom_question";
   return "";
+}
+
+function inferArtifactKind(field) {
+  const text = `${field.prompt || ""} ${field.name || ""} ${field.id || ""} ${field.placeholder || ""}`.toLowerCase();
+  const normalized = text.replace(/[_-]+/g, " ");
+  if (/\b(resume|cv|curriculum vitae)\b/.test(normalized)) return "cv_upload";
+  if (/\b(photo|headshot|avatar|profile picture)\b/.test(normalized)) return "headshot";
+  if (/\b(cover letter|cover note)\b/.test(normalized)) return "cover_letter";
+  if (/\b(motivation letter|motivation statement)\b/.test(normalized)) return "motivation_letter";
+  if (/\b(supporting statement|personal statement|statement of interest)\b/.test(normalized)) return "supporting_statement";
+  if (/\b(questionnaire|application answers|response document|responses)\b/.test(normalized)) return "questionnaire_answers";
+  if (/\b(additional information|supporting document)\b/.test(normalized)) return "additional_information";
+  return "";
+}
+
+function resolveArtifactForField(field, task) {
+  const artifacts = task.application?.artifacts || {};
+  const inferred = inferArtifactKind(field);
+  const candidates = [];
+  if (inferred === "cv_upload") {
+    candidates.push(["cv_upload", artifacts.cv_upload], ["resume", artifacts.resume], ["cv_upload", task.profile?.cv_path]);
+  } else if (inferred === "headshot") {
+    candidates.push(["headshot", artifacts.headshot], ["photo", artifacts.photo], ["headshot", task.profile?.headshot_path]);
+  } else if (inferred === "cover_letter") {
+    candidates.push(["cover_letter", artifacts.cover_letter], ["motivation_letter", artifacts.motivation_letter], ["supporting_statement", artifacts.supporting_statement]);
+  } else if (inferred === "motivation_letter") {
+    candidates.push(["motivation_letter", artifacts.motivation_letter], ["cover_letter", artifacts.cover_letter], ["supporting_statement", artifacts.supporting_statement]);
+  } else if (inferred === "supporting_statement") {
+    candidates.push(["supporting_statement", artifacts.supporting_statement], ["additional_information", artifacts.additional_information], ["questionnaire_answers", artifacts.questionnaire_answers], ["cover_letter", artifacts.cover_letter]);
+  } else if (inferred === "questionnaire_answers" || inferred === "additional_information") {
+    candidates.push(["questionnaire_answers", artifacts.questionnaire_answers], ["additional_information", artifacts.additional_information], ["supporting_statement", artifacts.supporting_statement], ["cover_letter", artifacts.cover_letter]);
+  } else {
+    candidates.push(["cv_upload", artifacts.cv_upload], ["cover_letter", artifacts.cover_letter], ["supporting_statement", artifacts.supporting_statement], ["questionnaire_answers", artifacts.questionnaire_answers]);
+  }
+  for (const [kind, artifactPath] of candidates) {
+    if (artifactPath && fs.existsSync(artifactPath)) {
+      return { kind, path: artifactPath };
+    }
+  }
+  return { kind: inferred || "file_upload", path: "" };
 }
 
 function answerForCategory(category, field, task) {
@@ -718,8 +887,15 @@ function answerForCategory(category, field, task) {
   if (category === "phone") return { value: profile.phone };
   if (category === "linkedin") return { value: profile.linkedin_url };
   if (category === "website") return { value: profile.portfolio_url || profile.linkedin_url };
+  if (category === "street_address") return { value: profile.street_address };
+  if (category === "suburb") return { value: profile.suburb };
   if (category === "location") return { value: profile.location };
-  if (category === "country") return { value: "South Africa", choice: "South Africa" };
+  if (category === "city") return { value: profile.city };
+  if (category === "region") return { value: profile.region };
+  if (category === "postcode") return { value: profile.postcode };
+  if (category === "country") return { value: profile.country || "South Africa", choice: profile.country || "South Africa" };
+  if (category === "current_employer") return { value: profile.current_employer };
+  if (category === "current_job_title") return { value: profile.current_job_title };
   if (category === "cover_letter") return { value: app.cover_letter };
   if (category === "motivation") return { value: motivationText(task) };
   if (category === "salary") return { value: profile.salary_expectation };
@@ -870,6 +1046,57 @@ async function fillScannedFields(page, task, report, stepLabel = "step-1") {
       }
       continue;
     }
+    if (category === "headshot_upload") {
+      try {
+        const locator = allLocators.nth(field.index);
+        const headshotPath = task.profile && task.profile.headshot_path;
+        if (headshotPath && fs.existsSync(headshotPath)) {
+          await locator.setInputFiles(headshotPath, { timeout: 8000 });
+          record(report.filled_fields, { prompt, value: path.basename(headshotPath), category, kind: "file" });
+        } else {
+          record(report.review_fields, { prompt, category, reason: "Headshot path was not available for this upload field." });
+        }
+      } catch (error) {
+        record(report.review_fields, { prompt, category, reason: error.message });
+      }
+      continue;
+    }
+    if (category === "cover_letter_upload") {
+      try {
+        const locator = allLocators.nth(field.index);
+        const coverLetterPath = task.application && task.application.cover_letter_file_path;
+        if (coverLetterPath && fs.existsSync(coverLetterPath)) {
+          await locator.setInputFiles(coverLetterPath, { timeout: 8000 });
+          record(report.filled_fields, { prompt, value: path.basename(coverLetterPath), category, kind: "file" });
+        } else {
+          record(report.review_fields, { prompt, category, reason: "Cover-letter file path was not available for this upload field." });
+        }
+      } catch (error) {
+        record(report.review_fields, { prompt, category, reason: error.message });
+      }
+      continue;
+    }
+    if (category === "file_upload") {
+      try {
+        const locator = allLocators.nth(field.index);
+        const artifact = resolveArtifactForField(field, task);
+        if (artifact.path) {
+          await locator.setInputFiles(artifact.path, { timeout: 8000 });
+          record(report.filled_fields, { prompt, value: path.basename(artifact.path), category: artifact.kind, kind: "file" });
+        } else if (field.required) {
+          record(report.review_fields, {
+            prompt,
+            category,
+            reason: "This file upload asks for a document type that is not generated yet. Review and upload manually."
+          });
+        } else {
+          record(report.skipped_fields, { prompt, category, reason: "Optional file upload without a safe matching artifact." });
+        }
+      } catch (error) {
+        record(report.review_fields, { prompt, category, reason: error.message });
+      }
+      continue;
+    }
     if (!category) continue;
     const currentValue = String(field.currentValue || "").trim();
     const looksLikeBadPrefill = Boolean(
@@ -924,8 +1151,28 @@ function persistReport(task, report) {
   fs.writeFileSync(task.report_path, JSON.stringify(report, null, 2), "utf8");
 }
 
+function cooldownHoursForBlocker(platform, url = "") {
+  const host = hostFromUrl(url);
+  const key = String(platform || "").toLowerCase();
+  if (host.endsWith("smartrecruiters.com") || key === "smartrecruiters") return 12;
+  if (host.endsWith("myworkdayjobs.com") || key === "workday") return 12;
+  return 6;
+}
+
+function shouldHoldBrowserOpen(report) {
+  return !["blocked-domain"].includes(String(report?.status || ""));
+}
+
 async function detectBlocker(page) {
   const bodyText = shortText(await page.locator("body").innerText().catch(() => ""), 3000).toLowerCase();
+  if (/access is temporarily restricted|detected unusual activity|automated \(bot\) activity|use of developer or inspection tools|rapid taps or clicks/.test(bodyText)) {
+    return {
+      kind: "platform-restriction",
+      message: "The ATS restricted access after detecting unusual or automated activity.",
+      url: page.url(),
+      cooldown_hours: cooldownHoursForBlocker("", page.url())
+    };
+  }
   const recaptcha = await page.locator('iframe[src*="recaptcha"], iframe[title*="captcha" i], iframe[src*="hcaptcha"]').count().catch(() => 0);
   if (recaptcha || /verify you are human|security check|unusual traffic|robot|captcha/.test(bodyText)) {
     return {
@@ -946,6 +1193,26 @@ async function detectBlocker(page) {
 }
 
 async function waitForManualClearance(page, task, report, blocker) {
+  if (blocker.kind === "platform-restriction") {
+    const cooldownHours = Number(blocker.cooldown_hours || cooldownHoursForBlocker(report.platform || "", blocker.url || page.url()));
+    const blockedUntil = new Date(Date.now() + cooldownHours * 60 * 60 * 1000).toISOString();
+    report.status = "blocked-domain";
+    report.blocker = {
+      kind: blocker.kind,
+      message: blocker.message,
+      url: blocker.url || page.url(),
+      detected_at: report.blocker?.detected_at || nowIso(),
+      last_seen_at: nowIso(),
+      blocked_until: blockedUntil,
+      cooldown_hours: cooldownHours
+    };
+    record(report.review_fields, {
+      prompt: "ATS restriction page",
+      reason: `${blocker.message} Cooldown set until ${blockedUntil}. Retry later and avoid rapid repeated attempts on this ATS.`
+    });
+    persistReport(task, report);
+    return false;
+  }
   report.status = "waiting-user-action";
   report.blocker = {
     kind: blocker.kind,
@@ -1139,6 +1406,8 @@ async function clickSafeContinue(page, report, platform) {
 async function fillCurrentStep(page, task, report, stepLabel) {
   await fillProfileFields(page, task, report);
   await uploadCv(page, task, report);
+  await uploadCoverLetter(page, task, report);
+  await uploadHeadshot(page, task, report);
   await fillTextAreas(page, task, report);
   await answerCommonScreening(page, task, report);
   let fields = await fillScannedFields(page, task, report, stepLabel);
@@ -1146,6 +1415,8 @@ async function fillCurrentStep(page, task, report, stepLabel) {
     page = await clickApplyIfPresent(page, report, report.platform || "");
     await fillProfileFields(page, task, report);
     await uploadCv(page, task, report);
+    await uploadCoverLetter(page, task, report);
+    await uploadHeadshot(page, task, report);
     await fillTextAreas(page, task, report);
     await answerCommonScreening(page, task, report);
     fields = await fillScannedFields(page, task, report, `${stepLabel}-after-apply`);
@@ -1230,7 +1501,7 @@ async function main() {
       await saveSessionState(context, statePath, report);
       await addReviewBanner(page, task).catch(() => {});
       await saveArtifacts(page, task, report);
-      await page.waitForTimeout(24 * 60 * 60 * 1000);
+      if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
     await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -1239,7 +1510,7 @@ async function main() {
       await saveSessionState(context, statePath, report);
       await addReviewBanner(page, task).catch(() => {});
       await saveArtifacts(page, task, report);
-      await page.waitForTimeout(24 * 60 * 60 * 1000);
+      if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
     await attemptLoginIfNeeded(page, task, report);
@@ -1248,7 +1519,7 @@ async function main() {
       await saveSessionState(context, statePath, report);
       await addReviewBanner(page, task).catch(() => {});
       await saveArtifacts(page, task, report);
-      await page.waitForTimeout(24 * 60 * 60 * 1000);
+      if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
     page = await clickApplyIfPresent(page, report, platform);
@@ -1257,7 +1528,7 @@ async function main() {
       await saveSessionState(context, statePath, report);
       await addReviewBanner(page, task).catch(() => {});
       await saveArtifacts(page, task, report);
-      await page.waitForTimeout(24 * 60 * 60 * 1000);
+      if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
     await attemptLoginIfNeeded(page, task, report);
@@ -1271,7 +1542,7 @@ async function main() {
         await saveSessionState(context, statePath, report);
         await addReviewBanner(page, task).catch(() => {});
         await saveArtifacts(page, task, report);
-        await page.waitForTimeout(24 * 60 * 60 * 1000);
+        if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
         return;
       }
       const fingerprint = fieldFingerprint(fields);
@@ -1283,7 +1554,7 @@ async function main() {
         await saveSessionState(context, statePath, report);
         await addReviewBanner(page, task).catch(() => {});
         await saveArtifacts(page, task, report);
-        await page.waitForTimeout(24 * 60 * 60 * 1000);
+        if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
         return;
       }
       await attemptLoginIfNeeded(page, task, report);
@@ -1293,7 +1564,7 @@ async function main() {
     await addReviewBanner(page, task).catch(() => {});
     await saveArtifacts(page, task, report);
     console.log("Form preparation complete. Review manually and submit yourself. Close the browser when done.");
-    await page.waitForTimeout(24 * 60 * 60 * 1000);
+    if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
   } catch (error) {
     report.errors.push(error.stack || error.message);
     await saveSessionState(context, statePath, report).catch(() => {});
