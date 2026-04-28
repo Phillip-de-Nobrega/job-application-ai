@@ -897,6 +897,7 @@ def init_db() -> None:
                 id integer primary key autoincrement,
                 job_id integer not null references jobs(id) on delete cascade,
                 status text not null default 'draft',
+                queue_state text not null default 'review',
                 contact_email text not null default '',
                 contact_name text not null default '',
                 contact_role text not null default '',
@@ -1074,6 +1075,8 @@ def init_db() -> None:
         ensure_column(conn, "applications", "form_prep_task_path", "text not null default ''")
         ensure_column(conn, "applications", "form_prep_started_at", "text not null default ''")
         ensure_column(conn, "applications", "batch_id", "text not null default ''")
+        ensure_column(conn, "applications", "queue_state", "text not null default 'review'")
+        conn.execute("update applications set queue_state='review' where queue_state=''")
         ensure_column(conn, "jobs", "too_senior", "integer not null default 0")
         seed_default_cv_versions(conn)
         seed_default_answer_bank(conn)
@@ -2599,6 +2602,23 @@ def refresh_application_queue(limit: int = 5) -> dict[str, Any]:
         "drafts": drafts,
         "assessed": assessed,
     }
+
+
+def set_application_queue_state(application_id: int, queue_state: str) -> dict[str, Any]:
+    allowed = {"review", "approved", "hold"}
+    normalized = normalize_space(queue_state).lower() or "review"
+    if normalized not in allowed:
+        raise RuntimeError("Invalid queue state.")
+    with connect() as conn:
+        row = conn.execute("select id from applications where id=?", (application_id,)).fetchone()
+        if not row:
+            raise RuntimeError("Application not found")
+        conn.execute(
+            "update applications set queue_state=?, updated_at=? where id=?",
+            (normalized, now_iso(), application_id),
+        )
+        conn.commit()
+    return {"id": application_id, "queue_state": normalized}
 
 
 def reject_application_and_replace(application_id: int) -> dict[str, Any]:
@@ -5546,7 +5566,9 @@ def generate_application(conn: sqlite3.Connection, job_id: int, batch_id: str = 
         """
         update applications
         set cover_letter=?, cv_notes=?, answers=?, follow_up=?, research_notes=?,
-            research_sources=?, research_url=?, next_follow_up=?, batch_id=?, updated_at=?
+            research_sources=?, research_url=?, next_follow_up=?, batch_id=?,
+            queue_state=case when queue_state='' then 'review' else queue_state end,
+            updated_at=?
         where id=?
         """,
         (
@@ -6453,6 +6475,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 app_id = int(data.get("id") or 0)
                 result = reject_application_and_replace(app_id)
                 self.json({"ok": True, **result})
+            elif parsed.path == "/api/applications/queue-state":
+                app_id = int(data.get("id") or 0)
+                result = set_application_queue_state(app_id, str(data.get("queue_state") or "review"))
+                self.json({"ok": True, **result})
             elif parsed.path == "/api/jobs/rescore":
                 with connect() as conn:
                     result = rescore_all_jobs(conn)
@@ -6472,6 +6498,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     app_id = int(data.get("id"))
                     fields = [
                         "status",
+                        "queue_state",
                         "contact_email",
                         "contact_name",
                         "contact_role",
@@ -8066,7 +8093,24 @@ Record:
         if (!batchId) return latest;
         return !latest || batchId > latest ? batchId : latest;
       }, "");
-      return latestBatchId ? activeApps.filter(app => String(app.batch_id || "") === latestBatchId) : activeApps.slice(0, 5);
+      const queueOrder = {approved: 0, review: 1, hold: 2};
+      const queueState = app => normalizeQueueState(app.queue_state);
+      const apps = latestBatchId ? activeApps.filter(app => String(app.batch_id || "") === latestBatchId) : activeApps.slice(0, 5);
+      return apps.slice().sort((a, b) => {
+        const diff = (queueOrder[queueState(a)] ?? 9) - (queueOrder[queueState(b)] ?? 9);
+        if (diff) return diff;
+        return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+      });
+    }
+
+    function normalizeQueueState(value) {
+      const normalized = String(value || "").toLowerCase();
+      return ["review", "approved", "hold"].includes(normalized) ? normalized : "review";
+    }
+
+    function queueStateLabel(app) {
+      const labels = {review: "needs review", approved: "approved", hold: "on hold"};
+      return labels[normalizeQueueState(app.queue_state)] || "needs review";
     }
 
     function renderAutoApplyQueue() {
@@ -8076,36 +8120,68 @@ Record:
       const controls = document.getElementById("queueControls");
       if (!summary || !batch || !health || !controls) return;
       const apps = currentBatchApplications();
-      const ready = apps.filter(app => !activeBlockedDomain(app.url) && !activeThrottledDomain(app.url)).length;
+      const approved = apps.filter(app => normalizeQueueState(app.queue_state) === "approved").length;
+      const review = apps.filter(app => normalizeQueueState(app.queue_state) === "review").length;
+      const hold = apps.filter(app => normalizeQueueState(app.queue_state) === "hold").length;
+      const ready = apps.filter(app => normalizeQueueState(app.queue_state) === "approved" && !activeBlockedDomain(app.url) && !activeThrottledDomain(app.url)).length;
       summary.innerHTML = `
         <div class="metric-grid">
           ${metric("Current batch", apps.length, "latest generated set")}
-          ${metric("Ready", ready, "not blocked or throttled")}
-          ${metric("Needs review", apps.filter(app => missingApplicationItems(app).length).length, "missing draft items or fit checks")}
+          ${metric("Approved", approved, "cleared for prep")}
+          ${metric("Needs review", review, "awaiting your decision")}
+          ${metric("On hold", hold, "kept aside for later")}
+          ${metric("Ready", ready, "approved and not blocked")}
           ${metric("Prepared", apps.filter(app => app.form_prep_started_at).length, "live form prep started")}
         </div>
       `;
-      batch.innerHTML = apps.map(app => {
+      const grouped = {
+        review: apps.filter(app => normalizeQueueState(app.queue_state) === "review"),
+        approved: apps.filter(app => normalizeQueueState(app.queue_state) === "approved"),
+        hold: apps.filter(app => normalizeQueueState(app.queue_state) === "hold"),
+      };
+      const renderQueueCard = app => {
         const job = appJob(app);
+        const isBlocked = activeBlockedDomain(app.url);
+        const isThrottled = !isBlocked && activeThrottledDomain(app.url);
         return `
           <div class="reminder">
             <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
             <div class="meta">Score ${escapeHtml(job.score ?? "n/a")} - quality ${escapeHtml(app.quality_score || 0)} - ${escapeHtml(app.location || "Location not listed")}</div>
             <p class="muted">${escapeHtml(nextApplicationAction(app))}</p>
             <div>
+              <span class="tag">${escapeHtml(queueStateLabel(app))}</span>
               ${app.manual_first ? `<span class="tag">manual-first ATS</span>` : ""}
-              ${activeBlockedDomain(app.url) ? `<span class="tag">ats cooldown</span>` : ""}
-              ${!activeBlockedDomain(app.url) && activeThrottledDomain(app.url) ? `<span class="tag">ats rate limit</span>` : ""}
+              ${isBlocked ? `<span class="tag">ats cooldown</span>` : ""}
+              ${isThrottled ? `<span class="tag">ats rate limit</span>` : ""}
               ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
             </div>
             <div class="actions">
+              <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
+              <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
+              <button class="btn" onclick="setApplicationQueueState(${app.id}, 'review')">Review</button>
               <button class="btn primary" onclick="selectApplication(${app.id})">Edit draft</button>
               <button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>
               <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">No thanks</button>
             </div>
           </div>
         `;
-      }).join("") || `<p class="muted">No current batch yet. Refresh the queue after discovery finds stronger graduate-level roles.</p>`;
+      };
+      batch.innerHTML = apps.length ? `
+        <div class="grid">
+          <div class="panel">
+            <h3>Needs Review</h3>
+            ${grouped.review.map(renderQueueCard).join("") || `<p class="muted">No roles waiting for review.</p>`}
+          </div>
+          <div class="panel">
+            <h3>Approved</h3>
+            ${grouped.approved.map(renderQueueCard).join("") || `<p class="muted">No approved roles yet.</p>`}
+          </div>
+          <div class="panel">
+            <h3>On Hold</h3>
+            ${grouped.hold.map(renderQueueCard).join("") || `<p class="muted">No roles on hold.</p>`}
+          </div>
+        </div>
+      ` : `<p class="muted">No current batch yet. Refresh the queue after discovery finds stronger graduate-level roles.</p>`;
       const blocked = blockedDomainSummaryHtml();
       const throttled = throttledDomainSummaryHtml();
       health.innerHTML = `
@@ -8115,7 +8191,7 @@ Record:
         ${throttled}
       `;
       controls.innerHTML = `
-        <p class="muted">Use the queue like an approval board: reject weak roles quickly, then prepare only the strongest ones. Sensitive ATSs are intentionally slowed.</p>
+        <p class="muted">Use the queue like an approval board: move strong roles into Approved, park uncertain ones on Hold, and reject weak roles. Sensitive ATSs are intentionally slowed.</p>
         <div class="actions">
           <button class="btn primary" onclick="refreshApplicationQueue()">Pull next batch</button>
           <button class="btn" onclick="showTab('discover')">Add more sources</button>
@@ -8919,6 +8995,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <div>
             ${app.research_notes ? `<span class="tag">research saved</span>` : `<span class="tag">research needed</span>`}
             <span class="tag">quality ${escapeHtml(app.quality_score || 0)}</span>
+            <span class="tag">${escapeHtml(queueStateLabel(app))}</span>
             ${String(app.url || "").toLowerCase().includes("remoteok.com/remote-jobs/") ? `<span class="tag">board login wall</span>` : ""}
             ${app.manual_first ? `<span class="tag">manual-first ATS</span>` : ""}
             ${activeBlockedDomain(app.url) ? `<span class="tag">ats cooldown</span>` : ""}
@@ -8928,6 +9005,8 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           </div>
           ${String(app.url || "").toLowerCase().includes("remoteok.com/remote-jobs/") ? `<p class="muted">This draft still uses a RemoteOK listing URL. Prepare form will be blocked until you switch it to a direct company or ATS apply URL.</p>` : ""}
           <div class="actions">
+            <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
+            <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
             <button class="btn primary" onclick="selectApplication(${app.id})">Edit</button>
             <button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>
             <button class="btn" onclick="resumeApplicationCard(${app.id})">Resume form</button>
@@ -9245,6 +9324,10 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         <label>Status</label>
         <select id="edit_status">
           ${["draft", "ready", "submitted", "interview", "rejected", "offer"].map(s => `<option value="${s}" ${app.status === s ? "selected" : ""}>${s}</option>`).join("")}
+        </select>
+        <label>Queue state</label>
+        <select id="edit_queue_state">
+          ${["review", "approved", "hold"].map(s => `<option value="${s}" ${normalizeQueueState(app.queue_state) === s ? "selected" : ""}>${s}</option>`).join("")}
         </select>
         <div class="notice">
           Prepare form opens a visible browser, tries saved login/session data, fills what it can, writes a field-by-field report, and still stops before final submit.
@@ -9731,6 +9814,16 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       window.scrollTo({top: 0, behavior: "smooth"});
     }
 
+    async function setApplicationQueueState(id, queue_state) {
+      await api("/api/applications/queue-state", {method: "POST", body: JSON.stringify({id, queue_state})});
+      const labels = {review: "moved back to review", approved: "approved for prep", hold: "moved to hold"};
+      message(`Application ${labels[queue_state] || "updated"}.`);
+      await load();
+      if (selectedApplication && Number(selectedApplication.id) === Number(id)) {
+        selectApplication(id, false);
+      }
+    }
+
     async function rejectApplication(id) {
       const app = (state.applications || []).find(item => Number(item.id) === Number(id));
       if (!app) return;
@@ -9767,6 +9860,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       const payload = {
         id: selectedApplication.id,
         status: document.getElementById("edit_status").value,
+        queue_state: document.getElementById("edit_queue_state").value,
         contact_email: document.getElementById("edit_contact_email").value,
         contact_name: document.getElementById("edit_contact_name").value,
         contact_role: document.getElementById("edit_contact_role").value,
