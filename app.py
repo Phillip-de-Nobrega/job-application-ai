@@ -77,7 +77,7 @@ DEFAULT_PROFILE: dict[str, str] = {
     "cv_text": "",
     "portfolio_url": "",
     "linkedin_url": "https://linkedin.com/in/phillip-de-nobrega-87542b353",
-    "target_roles": "Marketing roles, especially outdoor, sports, fitness, brand, content, social media, growth, partnerships, community, and campaign roles.",
+    "target_roles": "Early-career marketing roles, especially graduate, junior, assistant, coordinator, associate, executive, specialist, content, brand, social media, growth, partnerships, community, and campaign roles. Avoid managerial, director, head-of, VP, or other leadership roles unless Phillip explicitly approves them.",
     "preferred_industries": "Outdoor, sports, fitness, wellness, performance, lifestyle, adventure, consumer brands, events, and agencies serving those markets.",
     "target_locations": "Cape Town in-person/hybrid roles, or remote roles based anywhere Phillip can legally work. Non-Cape-Town in-person roles should be avoided unless Phillip explicitly approves them.",
     "daily_target": "5 high-quality applications per day.",
@@ -258,6 +258,10 @@ SENIORITY_WARNINGS = [
     "senior ",
     "sr. ",
     "sr ",
+    "manager",
+    "marketing manager",
+    "brand manager",
+    "growth manager",
     "director",
     "director ",
     "senior director",
@@ -300,12 +304,21 @@ MARKETING_TITLE_SIGNALS = [
     "advertising",
     "creative strategist",
     "copywriter",
+    "content creator",
+    "marketing coordinator",
+    "marketing specialist",
+    "marketing executive",
+    "brand coordinator",
+    "brand specialist",
+    "social media coordinator",
+    "social media specialist",
 ]
 
 NON_TARGET_TITLE_SIGNALS = [
     "engineer",
     "developer",
     "designer",
+    "creative director",
     "product manager",
     "project coordinator",
     "project manager",
@@ -329,15 +342,38 @@ NON_TARGET_TITLE_SIGNALS = [
     "learning and development",
     "learning & development",
     "training specialist",
+    "doctor",
+    "physician",
+    "radiologist",
+    "radiology",
+    "neuroradiologist",
+    "nurse",
+    "surgeon",
+    "therapist",
+    "clinical",
+    "medical",
+    "healthcare",
     "warehouse",
     "retail associate",
     "sales assistant",
 ]
 
 HARD_NON_TARGET_TITLE_SIGNALS = [
+    "creative director",
     "content reviewer",
     "online data analyst",
     "data analyst",
+    "doctor",
+    "physician",
+    "radiologist",
+    "radiology",
+    "neuroradiologist",
+    "nurse",
+    "surgeon",
+    "therapist",
+    "clinical",
+    "medical",
+    "healthcare",
     "office assistant",
     "technical support",
     "support operator",
@@ -1379,17 +1415,25 @@ def assess_role_level(title: str, text: str) -> tuple[int, list[str], list[str]]
         for term in SENIORITY_WARNINGS
         if term in lower_title or (term.endswith("+ years") and term in lower_text)
     ]
+    manager_like = any(
+        term in lower_title
+        for term in ["manager", "director", "head of", "vice president", "vp ", "principal", "lead "]
+    )
     if senior_hits:
-        delta -= 26
+        delta -= 34 if manager_like else 26
         concerns.append("Possible seniority mismatch: " + ", ".join(senior_hits[:4]))
-    elif "manager" in lower_title and not any(term in lower_title for term in ["assistant", "junior", "intern"]):
-        delta -= 14
-        concerns.append("Manager title may be above graduate/junior level; review requirements.")
+    elif "manager" in lower_title and not any(term in lower_title for term in ["assistant", "junior", "intern", "trainee"]):
+        delta -= 28
+        concerns.append("Not an early-career role: manager title is above graduate/junior level.")
 
     hard_non_target_hits = [term for term in HARD_NON_TARGET_TITLE_SIGNALS if term in lower_title]
     if hard_non_target_hits:
         delta -= 45
         concerns.append("Role-title mismatch for marketing target: " + ", ".join(hard_non_target_hits[:4]))
+
+    if any(term in lower_text for term in ["board-certified", "board eligible", "fellowship-trained", "clinical practice", "patient care"]):
+        delta -= 50
+        concerns.append("Role-title mismatch for marketing target: licensed medical/clinical role.")
 
     has_marketing_title = any(
         term in lower_title
@@ -1403,6 +1447,14 @@ def assess_role_level(title: str, text: str) -> tuple[int, list[str], list[str]]
             "advertising",
             "creative strategist",
             "copywriter",
+            "content creator",
+            "marketing coordinator",
+            "marketing specialist",
+            "marketing executive",
+            "brand coordinator",
+            "brand specialist",
+            "social media coordinator",
+            "social media specialist",
         ]
     )
     non_target_hits = [term for term in NON_TARGET_TITLE_SIGNALS if term in lower_title]
@@ -2304,6 +2356,7 @@ def shortlist_top_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, An
           and lower(concerns) not like '%remote role appears restricted%'
           and lower(concerns) not like '%remote role text suggests geographic restrictions%'
           and lower(concerns) not like '%marked this role as too senior%'
+          and lower(concerns) not like '%not an early-career role%'
           and lower(concerns) not like '%would require relocation%'
           and lower(concerns) not like '%local/eu work authorization%'
           and lower(concerns) not like '%us non-remote%'
@@ -2312,6 +2365,7 @@ def shortlist_top_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, An
           (score
             + case when lower(location) like '%cape town%' or lower(location) like '%western cape%' then 6 else 0 end
             - case when lower(concerns) like '%manager title may be above graduate/junior level%' then 4 else 0 end
+            - case when lower(concerns) like '%not an early-career role%' then 18 else 0 end
             - case when lower(concerns) like '%possible seniority mismatch%' then 8 else 0 end
           ) desc,
           case when lower(location) like '%cape town%' or lower(location) like '%western cape%' then 1 else 0 end desc,
@@ -2374,6 +2428,7 @@ def shortlist_fresh_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, 
           and lower(jobs.concerns) not like '%remote role appears restricted%'
           and lower(jobs.concerns) not like '%remote role text suggests geographic restrictions%'
           and lower(jobs.concerns) not like '%marked this role as too senior%'
+          and lower(jobs.concerns) not like '%not an early-career role%'
           and lower(jobs.concerns) not like '%would require relocation%'
           and lower(jobs.concerns) not like '%local/eu work authorization%'
           and lower(jobs.concerns) not like '%us non-remote%'
@@ -2382,6 +2437,7 @@ def shortlist_fresh_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, 
           (jobs.score
             + case when lower(jobs.location) like '%cape town%' or lower(jobs.location) like '%western cape%' then 6 else 0 end
             - case when lower(jobs.concerns) like '%manager title may be above graduate/junior level%' then 4 else 0 end
+            - case when lower(jobs.concerns) like '%not an early-career role%' then 18 else 0 end
             - case when lower(jobs.concerns) like '%possible seniority mismatch%' then 8 else 0 end
           ) desc,
           case when lower(jobs.location) like '%cape town%' or lower(jobs.location) like '%western cape%' then 1 else 0 end desc,
@@ -2440,6 +2496,7 @@ def next_fresh_job_ids(conn: sqlite3.Connection, limit: int = 1) -> list[int]:
           and lower(jobs.concerns) not like '%remote role appears restricted%'
           and lower(jobs.concerns) not like '%remote role text suggests geographic restrictions%'
           and lower(jobs.concerns) not like '%marked this role as too senior%'
+          and lower(jobs.concerns) not like '%not an early-career role%'
           and lower(jobs.concerns) not like '%would require relocation%'
           and lower(jobs.concerns) not like '%local/eu work authorization%'
           and lower(jobs.concerns) not like '%us non-remote%'
@@ -2448,6 +2505,7 @@ def next_fresh_job_ids(conn: sqlite3.Connection, limit: int = 1) -> list[int]:
           (jobs.score
             + case when lower(jobs.location) like '%cape town%' or lower(jobs.location) like '%western cape%' then 6 else 0 end
             - case when lower(jobs.concerns) like '%manager title may be above graduate/junior level%' then 4 else 0 end
+            - case when lower(jobs.concerns) like '%not an early-career role%' then 18 else 0 end
             - case when lower(jobs.concerns) like '%possible seniority mismatch%' then 8 else 0 end
           ) desc,
           case when lower(jobs.location) like '%cape town%' or lower(jobs.location) like '%western cape%' then 1 else 0 end desc,

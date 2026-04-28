@@ -17,8 +17,10 @@ Last updated: 2026-04-28
   - slower, jittered browser pacing on sensitive ATSs
   - broader `manual-first ATS` policy
   - per-domain ATS prep rate limits before the harder cooldown after restriction pages
+  - stricter early-career filtering so graduate/junior/first-job marketing roles are preferred and manager/director/medical/non-marketing roles are filtered harder
 - Recent user-reported issue: some ATSs displayed restriction text such as `We detected unusual activity from your device or network`. The current direction is to reduce automation pace, enforce manual-first handling on sensitive ATSs, and rate-limit retries rather than trying to brute-force form prep.
-- Important current status: `app.py` and `scripts/form_filler.js` have uncommitted changes that should be committed before updating Codex or VS Code.
+- Latest queue result after tightening early-career filters: the app rescored the full jobs table and the fresh-batch generator returned `0` new good roles under the stricter rules. That is currently correct behavior and means discovery/source tuning needs improvement rather than padding the queue with bad-fit roles.
+- Important current status: only `app.py` is uncommitted right now.
 
 ## Project Goal
 
@@ -28,7 +30,7 @@ The app must be review-first: it can fill and draft, but Phillip checks and clic
 
 ## User Preferences
 
-- Target roles: marketing roles, ideally outdoor, sports, fitness, wellness, lifestyle, or consumer brands, but not limited to only those.
+- Target roles: early-career marketing roles, especially graduate, junior, first-job, assistant, coordinator, associate, executive, specialist, content, brand, social media, growth, partnerships, community, and campaign roles. Avoid managerial, director, head-of, VP, or other leadership roles unless Phillip explicitly approves them.
 - Target locations: Cape Town/Western Cape in-person or hybrid roles, and clearly remote roles based elsewhere. Remote USA/UK/Europe roles can be considered, but roles restricted to another physical city/country should be reviewed carefully.
 - Updated location rule from Phillip on 2026-04-23: he lives in Cape Town. Jobs should be in-person/hybrid in Cape Town/Western Cape, or clearly remote if based elsewhere. Non-Cape-Town physical roles should be avoided unless Phillip explicitly approves them.
 - Salary target: around R22,000/month. For foreign currencies, convert to South African rand and judge against that target.
