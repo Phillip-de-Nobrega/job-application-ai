@@ -1161,6 +1161,50 @@ def seed_default_cv_versions(conn: sqlite3.Connection) -> None:
         )
 
 
+def save_cv_version(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
+    cv_id = int(data.get("id") or 0)
+    name = normalize_space(str(data.get("name", "")))
+    if not name:
+        raise RuntimeError("CV version name is required.")
+    focus = normalize_space(str(data.get("focus", "")))
+    notes = normalize_space(str(data.get("notes", "")))
+    file_path = normalize_space(str(data.get("file_path", "")))
+    is_default = 1 if data.get("is_default") else 0
+    timestamp = now_iso()
+    if is_default:
+        conn.execute("update cv_versions set is_default=0, updated_at=?", (timestamp,))
+    if cv_id:
+        conn.execute(
+            """
+            update cv_versions
+            set name=?, focus=?, notes=?, file_path=?, is_default=?, updated_at=?
+            where id=?
+            """,
+            (name, focus, notes, file_path, is_default, timestamp, cv_id),
+        )
+        conn.commit()
+        return cv_id
+    cur = conn.execute(
+        """
+        insert into cv_versions(name, focus, notes, file_path, is_default, created_at, updated_at)
+        values(?, ?, ?, ?, ?, ?, ?)
+        """,
+        (name, focus, notes, file_path, is_default, timestamp, timestamp),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def delete_cv_version(conn: sqlite3.Connection, cv_id: int) -> None:
+    row = conn.execute("select id, is_default from cv_versions where id=?", (cv_id,)).fetchone()
+    if not row:
+        return
+    if int(row["is_default"] or 0):
+        raise RuntimeError("Set another default CV before deleting the current default.")
+    conn.execute("delete from cv_versions where id=?", (cv_id,))
+    conn.commit()
+
+
 def seed_default_answer_bank(conn: sqlite3.Connection) -> None:
     timestamp = now_iso()
     rows = [
@@ -6493,6 +6537,14 @@ class AppHandler(BaseHTTPRequestHandler):
                 with connect() as conn:
                     app_id = generate_application(conn, int(data.get("job_id")))
                 self.json({"ok": True, "id": app_id})
+            elif parsed.path == "/api/cv-versions/save":
+                with connect() as conn:
+                    cv_id = save_cv_version(conn, data)
+                self.json({"ok": True, "id": cv_id})
+            elif parsed.path == "/api/cv-versions/delete":
+                with connect() as conn:
+                    delete_cv_version(conn, int(data.get("id") or 0))
+                self.json({"ok": True})
             elif parsed.path == "/api/applications/save":
                 with connect() as conn:
                     app_id = int(data.get("id"))
@@ -6979,6 +7031,13 @@ def get_state() -> dict[str, Any]:
             app["form_prep_overrides_map"] = parse_form_prep_overrides(str(app.get("form_prep_overrides", "")))
             app["platform"] = detect_application_platform(str(app.get("url", "")), str(app.get("source", "")))
             app["manual_first"] = app["platform"] in MANUAL_FIRST_PLATFORMS
+            job_stub = {
+                "id": app.get("job_id"),
+                "company": app.get("company", ""),
+                "title": app.get("title", ""),
+            }
+            app["documents_folder"] = str(application_documents_folder(job_stub))
+            app["document_artifacts"] = build_application_artifacts(job_stub, app, profile)
         blocked_domains = active_domain_blockers(conn)
         throttled_domains = active_domain_rate_limits(conn)
         leads = [
@@ -6997,6 +7056,10 @@ def get_state() -> dict[str, Any]:
             row_to_dict(row)
             for row in conn.execute("select * from cv_versions order by is_default desc, name").fetchall()
         ]
+        for cv in cv_versions:
+            file_path = str(cv.get("file_path", "") or "")
+            cv["file_exists"] = bool(file_path and Path(file_path).exists())
+            cv["file_name"] = Path(file_path).name if file_path else ""
         answer_bank = [
             row_to_dict(row)
             for row in conn.execute("select * from answer_bank order by category, question_key").fetchall()
@@ -7435,8 +7498,16 @@ INDEX_HTML = r"""<!doctype html>
             <h2>Tailored Drafts</h2>
             <div id="resumeLabDrafts"></div>
           </div>
+          <div class="panel">
+            <h2>Generated Packs</h2>
+            <div id="resumeLabArtifacts"></div>
+          </div>
         </div>
         <div>
+          <div class="panel">
+            <h2>CV Version Editor</h2>
+            <div id="resumeLabEditor"></div>
+          </div>
           <div class="panel">
             <h2>Profile Snapshot</h2>
             <div id="resumeLabProfile"></div>
@@ -7994,6 +8065,7 @@ Record:
     let selectedApplication = null;
     let selectedLead = null;
     let selectedTarget = null;
+    let selectedCvVersion = null;
 
     const profileKeys = [
       "full_name", "email", "phone", "location", "street_address", "suburb", "city", "region", "postcode", "country",
@@ -8204,9 +8276,11 @@ Record:
       const summary = document.getElementById("resumeLabSummary");
       const cvs = document.getElementById("resumeLabCvVersions");
       const drafts = document.getElementById("resumeLabDrafts");
+      const artifacts = document.getElementById("resumeLabArtifacts");
+      const editor = document.getElementById("resumeLabEditor");
       const profile = document.getElementById("resumeLabProfile");
       const voice = document.getElementById("resumeLabVoice");
-      if (!summary || !cvs || !drafts || !profile || !voice) return;
+      if (!summary || !cvs || !drafts || !artifacts || !editor || !profile || !voice) return;
       const cvVersions = state.cv_versions || [];
       const apps = currentBatchApplications();
       summary.innerHTML = `
@@ -8222,6 +8296,12 @@ Record:
           <h3>${escapeHtml(cv.name || "CV version")}</h3>
           <div class="meta">${escapeHtml(cv.focus || "")}${cv.is_default ? " - default" : ""}</div>
           <p>${escapeHtml(cv.notes || "")}</p>
+          <p class="muted">${escapeHtml(cv.file_name || cv.file_path || "No file path saved")}${cv.file_exists ? "" : " - file missing"}</p>
+          <div class="actions">
+            <button class="btn primary" onclick="selectCvVersion(${cv.id})">Edit</button>
+            ${cv.is_default ? "" : `<button class="btn" onclick="setDefaultCvVersion(${cv.id})">Set default</button>`}
+            ${cv.is_default ? "" : `<button class="btn warn" onclick="deleteCvVersion(${cv.id})">Delete</button>`}
+          </div>
         </div>
       `).join("") || `<p class="muted">No CV versions saved yet.</p>`;
       drafts.innerHTML = apps.map(app => `
@@ -8235,6 +8315,37 @@ Record:
           </div>
         </div>
       `).join("") || `<p class="muted">No active application drafts to tailor right now.</p>`;
+      artifacts.innerHTML = apps.map(app => {
+        const artifactEntries = Object.entries(app.document_artifacts || {}).filter(([key]) => !["cv_upload", "resume", "headshot", "photo"].includes(key));
+        return `
+          <div class="reminder">
+            <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
+            <div class="meta">${escapeHtml(app.documents_folder || "")}</div>
+            ${artifactEntries.length ? `
+              <ul>
+                ${artifactEntries.map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong>: ${escapeHtml(value)}</li>`).join("")}
+              </ul>
+            ` : `<p class="muted">No generated artifacts found yet for this draft.</p>`}
+            <div class="actions">
+              <button class="btn primary" onclick="selectApplication(${app.id})">Open draft</button>
+            </div>
+          </div>
+        `;
+      }).join("") || `<p class="muted">No generated document packs in the current batch.</p>`;
+      const cv = selectedCvVersion || cvVersions.find(item => item.is_default) || cvVersions[0] || {};
+      editor.innerHTML = `
+        <input id="cv_version_id" type="hidden" value="${escapeAttr(cv.id || "")}">
+        <label>Name</label><input id="cv_version_name" value="${escapeAttr(cv.name || "")}" placeholder="Graduate marketing CV">
+        <label>Focus</label><input id="cv_version_focus" value="${escapeAttr(cv.focus || "")}" placeholder="general marketing, content, sport">
+        <label>File path</label><input id="cv_version_file_path" value="${escapeAttr(cv.file_path || "")}" placeholder="/Users/phillip/Desktop/.../cv.pdf">
+        <label>Notes</label><textarea id="cv_version_notes" style="min-height:180px">${escapeHtml(cv.notes || "")}</textarea>
+        <label><input id="cv_version_is_default" type="checkbox" style="width:auto" ${cv.is_default ? "checked" : ""}> Set as default CV version</label>
+        <div class="actions">
+          <button class="btn primary" onclick="saveCvVersion()">Save CV version</button>
+          <button class="btn" onclick="clearCvVersionForm()">New CV version</button>
+          ${cv.id && !cv.is_default ? `<button class="btn warn" onclick="deleteCvVersion(${cv.id})">Delete</button>` : ""}
+        </div>
+      `;
       profile.innerHTML = `
         <p><strong>${escapeHtml(state.profile.full_name || "")}</strong></p>
         <p class="meta">${escapeHtml(state.profile.location || "")}</p>
@@ -9273,6 +9384,16 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       document.getElementById("target_source_query").value = "marketing";
     }
 
+    function selectCvVersion(id) {
+      selectedCvVersion = (state.cv_versions || []).find(item => Number(item.id) === Number(id)) || null;
+      renderResumeLab();
+    }
+
+    function clearCvVersionForm() {
+      selectedCvVersion = null;
+      renderResumeLab();
+    }
+
     function selectLead(id, switchTab = true) {
       selectedLead = (state.leads || []).find(lead => lead.id === id);
       if (!selectedLead) return;
@@ -9802,6 +9923,51 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       message(`Generated ${result.count || 0} application drafts from shortlisted jobs.`);
       await load();
       showTab("applications");
+    }
+
+    async function saveCvVersion() {
+      const payload = {
+        id: document.getElementById("cv_version_id")?.value || "",
+        name: document.getElementById("cv_version_name")?.value || "",
+        focus: document.getElementById("cv_version_focus")?.value || "",
+        file_path: document.getElementById("cv_version_file_path")?.value || "",
+        notes: document.getElementById("cv_version_notes")?.value || "",
+        is_default: document.getElementById("cv_version_is_default")?.checked || false
+      };
+      await api("/api/cv-versions/save", {method: "POST", body: JSON.stringify(payload)});
+      message("CV version saved.");
+      selectedCvVersion = null;
+      await load();
+      showTab("resume_lab");
+    }
+
+    async function setDefaultCvVersion(id) {
+      const cv = (state.cv_versions || []).find(item => Number(item.id) === Number(id));
+      if (!cv) return;
+      await api("/api/cv-versions/save", {method: "POST", body: JSON.stringify({
+        id: cv.id,
+        name: cv.name,
+        focus: cv.focus,
+        file_path: cv.file_path,
+        notes: cv.notes,
+        is_default: true
+      })});
+      message("Default CV version updated.");
+      selectedCvVersion = null;
+      await load();
+      showTab("resume_lab");
+    }
+
+    async function deleteCvVersion(id) {
+      const cv = (state.cv_versions || []).find(item => Number(item.id) === Number(id));
+      if (!cv) return;
+      const confirmed = confirm(`Delete CV version ${cv.name}?`);
+      if (!confirmed) return;
+      await api("/api/cv-versions/delete", {method: "POST", body: JSON.stringify({id})});
+      message("CV version deleted.");
+      selectedCvVersion = null;
+      await load();
+      showTab("resume_lab");
     }
 
     async function refreshApplicationQueue() {
