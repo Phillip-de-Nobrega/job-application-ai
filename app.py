@@ -1037,6 +1037,7 @@ def init_db() -> None:
         ensure_column(conn, "applications", "form_prep_screenshot_path", "text not null default ''")
         ensure_column(conn, "applications", "form_prep_task_path", "text not null default ''")
         ensure_column(conn, "applications", "form_prep_started_at", "text not null default ''")
+        ensure_column(conn, "applications", "batch_id", "text not null default ''")
         ensure_column(conn, "jobs", "too_senior", "integer not null default 0")
         seed_default_cv_versions(conn)
         seed_default_answer_bank(conn)
@@ -2414,6 +2415,65 @@ def shortlist_fresh_jobs(conn: sqlite3.Connection, limit: int = 5) -> dict[str, 
     return {"count": len(ids), "ids": ids}
 
 
+def next_fresh_job_ids(conn: sqlite3.Connection, limit: int = 1) -> list[int]:
+    rows = conn.execute(
+        """
+        select jobs.id, jobs.company, jobs.title, jobs.score
+        from jobs
+        left join applications on applications.job_id = jobs.id
+        where jobs.status in ('new', 'drafted', 'shortlisted')
+          and applications.id is null
+          and coalesce(jobs.too_senior, 0) = 0
+          and jobs.score >= 35
+          and lower(jobs.concerns) not like '%role-title mismatch%'
+          and lower(jobs.concerns) not like '%potential scam%'
+          and lower(jobs.concerns) not like '%below the r22,000/month target%'
+          and lower(jobs.concerns) not like '%outside south africa/uk/remote target%'
+          and lower(jobs.concerns) not like '%outside cape town%'
+          and lower(jobs.concerns) not like '%not clearly cape town or remote%'
+          and lower(jobs.concerns) not like '%cape town/remote preference%'
+          and lower(jobs.concerns) not like '%cape town/remote target%'
+          and lower(jobs.concerns) not like '%physical location is not cape town%'
+          and lower(jobs.concerns) not like '%listed physical location is not cape town%'
+          and lower(jobs.concerns) not like '%remote role appears based%'
+          and lower(jobs.concerns) not like '%remote role is tied to a specific city/country%'
+          and lower(jobs.concerns) not like '%remote role appears restricted%'
+          and lower(jobs.concerns) not like '%remote role text suggests geographic restrictions%'
+          and lower(jobs.concerns) not like '%marked this role as too senior%'
+          and lower(jobs.concerns) not like '%would require relocation%'
+          and lower(jobs.concerns) not like '%local/eu work authorization%'
+          and lower(jobs.concerns) not like '%us non-remote%'
+          and lower(jobs.concerns) not like '%hybrid role may require%'
+        order by
+          (jobs.score
+            + case when lower(jobs.location) like '%cape town%' or lower(jobs.location) like '%western cape%' then 6 else 0 end
+            - case when lower(jobs.concerns) like '%manager title may be above graduate/junior level%' then 4 else 0 end
+            - case when lower(jobs.concerns) like '%possible seniority mismatch%' then 8 else 0 end
+          ) desc,
+          case when lower(jobs.location) like '%cape town%' or lower(jobs.location) like '%western cape%' then 1 else 0 end desc,
+          case when lower(jobs.location) like '%remote%' then 1 else 0 end desc,
+          jobs.score desc,
+          jobs.updated_at desc
+        limit ?
+        """,
+        (max(limit * 5, limit),),
+    ).fetchall()
+    ids: list[int] = []
+    seen_roles: set[tuple[str, str]] = set()
+    for row in rows:
+        key = (
+            re.sub(r"\W+", " ", str(row["company"] or "").lower()).strip(),
+            re.sub(r"\W+", " ", str(row["title"] or "").lower()).strip(),
+        )
+        if key in seen_roles:
+            continue
+        seen_roles.add(key)
+        ids.append(int(row["id"]))
+        if len(ids) >= limit:
+            break
+    return ids
+
+
 def rescore_all_jobs(conn: sqlite3.Connection) -> dict[str, Any]:
     rows = conn.execute("select * from jobs").fetchall()
     timestamp = now_iso()
@@ -2428,7 +2488,7 @@ def rescore_all_jobs(conn: sqlite3.Connection) -> dict[str, Any]:
     return {"count": len(rows)}
 
 
-def generate_drafts_for_jobs(conn: sqlite3.Connection, status: str = "shortlisted", limit: int = 5) -> dict[str, Any]:
+def generate_drafts_for_jobs(conn: sqlite3.Connection, status: str = "shortlisted", limit: int = 5, batch_id: str = "") -> dict[str, Any]:
     rows = conn.execute(
         """
         select jobs.id
@@ -2445,7 +2505,7 @@ def generate_drafts_for_jobs(conn: sqlite3.Connection, status: str = "shortliste
     app_ids: list[int] = []
     for row in rows:
         job_id = int(row["id"])
-        app_id = generate_application(conn, job_id)
+        app_id = generate_application(conn, job_id, batch_id=batch_id)
         ids.append(job_id)
         app_ids.append(app_id)
     return {"count": len(ids), "job_ids": ids, "application_ids": app_ids}
@@ -2468,15 +2528,60 @@ def run_daily_workflow(limit: int = 5) -> dict[str, Any]:
 
 
 def refresh_application_queue(limit: int = 5) -> dict[str, Any]:
+    batch_id = now_iso()
     with connect() as conn:
         rescored = rescore_all_jobs(conn)
         shortlisted = shortlist_fresh_jobs(conn, limit)
-        drafts = generate_drafts_for_jobs(conn, "shortlisted", limit)
+        drafts = generate_drafts_for_jobs(conn, "shortlisted", limit, batch_id=batch_id)
         assessed = assess_application_queue(conn)
     return {
+        "batch_id": batch_id,
         "rescored": rescored,
         "shortlisted": shortlisted,
         "drafts": drafts,
+        "assessed": assessed,
+    }
+
+
+def reject_application_and_replace(application_id: int) -> dict[str, Any]:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            select applications.*, jobs.id as job_id_value, jobs.company, jobs.title
+            from applications
+            join jobs on jobs.id = applications.job_id
+            where applications.id=?
+            """,
+            (application_id,),
+        ).fetchone()
+        if not row:
+            raise RuntimeError("Application not found")
+        app = row_to_dict(row) or {}
+        batch_id = str(app.get("batch_id", "") or now_iso())
+        timestamp = now_iso()
+        conn.execute(
+            "update applications set status='rejected', updated_at=? where id=?",
+            (timestamp, application_id),
+        )
+        conn.execute(
+            "update jobs set status='rejected', updated_at=? where id=?",
+            (timestamp, int(app.get("job_id_value") or app.get("job_id") or 0)),
+        )
+        replacement_ids = next_fresh_job_ids(conn, 1)
+        replacement_app_ids: list[int] = []
+        if replacement_ids:
+            placeholders = ",".join("?" for _ in replacement_ids)
+            conn.execute(
+                f"update jobs set status='shortlisted', updated_at=? where id in ({placeholders})",
+                [timestamp] + replacement_ids,
+            )
+            for job_id in replacement_ids:
+                replacement_app_ids.append(generate_application(conn, int(job_id), batch_id=batch_id))
+        assessed = assess_application_queue(conn)
+    return {
+        "rejected_id": application_id,
+        "replacement_job_ids": replacement_ids,
+        "replacement_application_ids": replacement_app_ids,
         "assessed": assessed,
     }
 
@@ -3580,7 +3685,7 @@ def detect_application_platform(url: str, source: str = "") -> str:
     return "custom"
 
 
-MANUAL_FIRST_PLATFORMS = {"smartrecruiters", "workday"}
+MANUAL_FIRST_PLATFORMS = {"smartrecruiters", "workday", "ashby", "greenhouse", "lever", "workable", "teamtailor", "recruitee"}
 DOMAIN_RESTRICTION_COOLDOWN_HOURS = {
     "smartrecruiters": 12,
     "workday": 12,
@@ -3588,6 +3693,17 @@ DOMAIN_RESTRICTION_COOLDOWN_HOURS = {
     "lever": 6,
     "ashby": 6,
     "default": 6,
+}
+DOMAIN_PREP_RATE_LIMIT_MINUTES = {
+    "smartrecruiters": 45,
+    "workday": 45,
+    "greenhouse": 15,
+    "lever": 15,
+    "ashby": 15,
+    "workable": 15,
+    "teamtailor": 15,
+    "recruitee": 15,
+    "default": 5,
 }
 
 
@@ -4550,6 +4666,11 @@ def cooldown_hours_for_platform(platform: str) -> int:
     return int(DOMAIN_RESTRICTION_COOLDOWN_HOURS.get(key, DOMAIN_RESTRICTION_COOLDOWN_HOURS["default"]))
 
 
+def prep_rate_limit_minutes_for_platform(platform: str) -> int:
+    key = normalize_space(platform).lower()
+    return int(DOMAIN_PREP_RATE_LIMIT_MINUTES.get(key, DOMAIN_PREP_RATE_LIMIT_MINUTES["default"]))
+
+
 def active_domain_blockers(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     now = dt.datetime.now(dt.timezone.utc)
     blockers: dict[str, dict[str, Any]] = {}
@@ -4595,6 +4716,51 @@ def active_domain_blockers(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return list(blockers.values())
 
 
+def active_domain_rate_limits(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    now = dt.datetime.now(dt.timezone.utc)
+    limited: dict[str, dict[str, Any]] = {}
+    rows = conn.execute(
+        """
+        select applications.id as application_id,
+               applications.form_prep_started_at,
+               applications.updated_at as application_updated_at,
+               jobs.company, jobs.title, jobs.url, jobs.source
+        from applications
+        join jobs on jobs.id = applications.job_id
+        where applications.form_prep_started_at != ''
+        order by applications.form_prep_started_at desc, applications.updated_at desc
+        """
+    ).fetchall()
+    for row in rows:
+        app = row_to_dict(row) or {}
+        url = str(app.get("url", ""))
+        domain = normalize_domain(url)
+        if not domain or domain in limited:
+            continue
+        started_at = parse_iso_datetime(str(app.get("form_prep_started_at", "")))
+        if not started_at:
+            continue
+        platform = str(detect_application_platform(url, str(app.get("source", ""))))
+        window_minutes = prep_rate_limit_minutes_for_platform(platform)
+        next_allowed = started_at + dt.timedelta(minutes=window_minutes)
+        if next_allowed <= now:
+            continue
+        limited[domain] = {
+            "domain": domain,
+            "platform": platform,
+            "company": str(app.get("company", "")),
+            "title": str(app.get("title", "")),
+            "application_id": int(app.get("application_id") or 0),
+            "url": url,
+            "message": f"Recent form preparation attempt detected. Wait before trying {domain} again.",
+            "started_at": started_at.isoformat(),
+            "next_allowed_at": next_allowed.isoformat(),
+            "window_minutes": window_minutes,
+            "manual_first": platform in MANUAL_FIRST_PLATFORMS,
+        }
+    return list(limited.values())
+
+
 def active_domain_blocker_for_url(conn: sqlite3.Connection, url: str) -> dict[str, Any] | None:
     variants = domain_variants_for_url(url)
     if not variants:
@@ -4604,6 +4770,18 @@ def active_domain_blocker_for_url(conn: sqlite3.Connection, url: str) -> dict[st
         for variant in variants:
             if domain and (variant == domain or variant.endswith(f".{domain}") or domain.endswith(f".{variant}")):
                 return blocker
+    return None
+
+
+def active_domain_rate_limit_for_url(conn: sqlite3.Connection, url: str) -> dict[str, Any] | None:
+    variants = domain_variants_for_url(url)
+    if not variants:
+        return None
+    for limited in active_domain_rate_limits(conn):
+        domain = normalize_domain(str(limited.get("domain", "")))
+        for variant in variants:
+            if domain and (variant == domain or variant.endswith(f".{domain}") or domain.endswith(f".{variant}")):
+                return limited
     return None
 
 
@@ -5292,7 +5470,7 @@ def ensure_application(conn: sqlite3.Connection, job_id: int) -> int:
     return int(cur.lastrowid)
 
 
-def generate_application(conn: sqlite3.Connection, job_id: int) -> int:
+def generate_application(conn: sqlite3.Connection, job_id: int, batch_id: str = "") -> int:
     profile = get_profile(conn)
     job = row_to_dict(conn.execute("select * from jobs where id = ?", (job_id,)).fetchone())
     if not job:
@@ -5310,10 +5488,22 @@ def generate_application(conn: sqlite3.Connection, job_id: int) -> int:
         """
         update applications
         set cover_letter=?, cv_notes=?, answers=?, follow_up=?, research_notes=?,
-            research_sources=?, research_url=?, next_follow_up=?, updated_at=?
+            research_sources=?, research_url=?, next_follow_up=?, batch_id=?, updated_at=?
         where id=?
         """,
-        (cover, cv_notes, answers, follow, research_notes, research_sources, research_url, next_follow_up, timestamp, app_id),
+        (
+            cover,
+            cv_notes,
+            answers,
+            follow,
+            research_notes,
+            research_sources,
+            research_url,
+            next_follow_up,
+            batch_id or timestamp,
+            timestamp,
+            app_id,
+        ),
     )
     conn.execute(
         """
@@ -5554,6 +5744,12 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
             f"{active_blocker.get('domain', 'This ATS domain')} is in cooldown until {active_blocker.get('blocked_until', '')} "
             f"after a platform restriction page. Wait for the cooldown to clear, then retry manually."
         )
+    active_limit = active_domain_rate_limit_for_url(conn, str(job.get("url", "")))
+    if active_limit:
+        raise RuntimeError(
+            f"{active_limit.get('domain', 'This ATS domain')} was prepared recently. "
+            f"Wait until {active_limit.get('next_allowed_at', '')} before trying again so the ATS does not flag rapid repeated activity."
+        )
 
     write_application_documents(job, app)
     docs_folder = application_documents_folder(job)
@@ -5606,6 +5802,7 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
         },
         "site_policy": {
             "manual_first": detect_application_platform(str(job.get("url", "")), str(job.get("source", ""))) in MANUAL_FIRST_PLATFORMS,
+            "prep_rate_limit_minutes": prep_rate_limit_minutes_for_platform(detect_application_platform(str(job.get("url", "")), str(job.get("source", "")))),
         },
     }
     task_path = TASK_DIR / f"application-{app_id}-{dt.datetime.now().strftime('%Y%m%d%H%M%S')}.json"
@@ -6194,6 +6391,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 limit = int(data.get("limit") or 5)
                 result = refresh_application_queue(limit)
                 self.json({"ok": True, **result})
+            elif parsed.path == "/api/applications/reject-and-replace":
+                app_id = int(data.get("id") or 0)
+                result = reject_application_and_replace(app_id)
+                self.json({"ok": True, **result})
             elif parsed.path == "/api/jobs/rescore":
                 with connect() as conn:
                     result = rescore_all_jobs(conn)
@@ -6694,6 +6895,7 @@ def get_state() -> dict[str, Any]:
             app["platform"] = detect_application_platform(str(app.get("url", "")), str(app.get("source", "")))
             app["manual_first"] = app["platform"] in MANUAL_FIRST_PLATFORMS
         blocked_domains = active_domain_blockers(conn)
+        throttled_domains = active_domain_rate_limits(conn)
         leads = [
             row_to_dict(row)
             for row in conn.execute("select * from company_leads order by updated_at desc, created_at desc").fetchall()
@@ -6776,6 +6978,7 @@ def get_state() -> dict[str, Any]:
         "inbox_messages": inbox_messages,
         "site_credentials": site_credentials,
         "blocked_domains": blocked_domains,
+        "throttled_domains": throttled_domains,
         "session_memory": read_session_memory(),
     }
 
@@ -7795,6 +7998,15 @@ Record:
       }) || null;
     }
 
+    function activeThrottledDomain(url) {
+      const domain = domainFromUrl(url);
+      if (!domain) return null;
+      return (state.throttled_domains || []).find(item => {
+        const limited = String(item.domain || "");
+        return limited && (domain === limited || domain.endsWith(`.${limited}`) || limited.endsWith(`.${domain}`));
+      }) || null;
+    }
+
     function blockedDomainSummaryHtml() {
       const items = state.blocked_domains || [];
       if (!items.length) return `<p class="muted">No ATS cooldowns are active.</p>`;
@@ -7803,6 +8015,19 @@ Record:
           <h3>${escapeHtml(item.domain || "Blocked ATS")}</h3>
           <div class="meta">${escapeHtml(item.platform || "platform")} - until ${escapeHtml(item.blocked_until || "")}</div>
           <p class="bad">${escapeHtml(item.message || "Platform restriction detected.")}</p>
+          <p class="muted">${escapeHtml(item.company || "")}${item.title ? ` - ${escapeHtml(item.title)}` : ""}</p>
+        </div>
+      `).join("");
+    }
+
+    function throttledDomainSummaryHtml() {
+      const items = state.throttled_domains || [];
+      if (!items.length) return `<p class="muted">No ATS rate limits are active.</p>`;
+      return items.map(item => `
+        <div class="reminder">
+          <h3>${escapeHtml(item.domain || "ATS throttle")}</h3>
+          <div class="meta">${escapeHtml(item.platform || "platform")} - next try after ${escapeHtml(item.next_allowed_at || "")}</div>
+          <p class="muted">${escapeHtml(item.message || "Recent form preparation attempt detected.")}</p>
           <p class="muted">${escapeHtml(item.company || "")}${item.title ? ` - ${escapeHtml(item.title)}` : ""}</p>
         </div>
       `).join("");
@@ -8253,16 +8478,29 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       const viewMode = document.getElementById("application_view_mode")?.value || "current";
       const completedStatuses = new Set(["submitted", "interview", "offer", "rejected"]);
       const activeApps = (state.applications || []).filter(app => !completedStatuses.has(String(app.status || "draft")));
+      const latestBatchId = activeApps.reduce((latest, app) => {
+        const batchId = String(app.batch_id || "");
+        if (!batchId) return latest;
+        return !latest || batchId > latest ? batchId : latest;
+      }, "");
       const visibleApps = viewMode === "all"
         ? (state.applications || [])
         : viewMode === "active"
           ? activeApps
-          : activeApps.slice(0, 5);
+          : latestBatchId
+            ? activeApps.filter(app => String(app.batch_id || "") === latestBatchId)
+            : activeApps.slice(0, 5);
       if (blockedTarget) {
-        const items = state.blocked_domains || [];
-        blockedTarget.innerHTML = items.length
-          ? `<div class="notice bad"><strong>ATS cooldowns active.</strong><br>These domains recently showed restriction pages and will be blocked from Prepare form until their cooldown expires.</div>${blockedDomainSummaryHtml()}`
-          : "";
+        const blocked = state.blocked_domains || [];
+        const throttled = state.throttled_domains || [];
+        const notices = [];
+        if (blocked.length) {
+          notices.push(`<div class="notice bad"><strong>ATS cooldowns active.</strong><br>These domains recently showed restriction pages and will be blocked from Prepare form until their cooldown expires.</div>${blockedDomainSummaryHtml()}`);
+        }
+        if (throttled.length) {
+          notices.push(`<div class="notice"><strong>ATS pacing limits active.</strong><br>These domains were prepared recently and are being intentionally delayed before the next attempt.</div>${throttledDomainSummaryHtml()}`);
+        }
+        blockedTarget.innerHTML = notices.join("");
       }
       list.innerHTML = visibleApps.map(app => `
         <div class="panel">
@@ -8270,12 +8508,14 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <div class="meta">${escapeHtml(app.company)} - ${escapeHtml(followUpLabel(app))}</div>
           <div class="meta">${escapeHtml(contactSummary(app))}</div>
           ${activeBlockedDomain(app.url) ? `<p class="bad">Prepare form is paused for ${escapeHtml(activeBlockedDomain(app.url).domain || "this ATS")} until ${escapeHtml(activeBlockedDomain(app.url).blocked_until || "")}.</p>` : ""}
+          ${!activeBlockedDomain(app.url) && activeThrottledDomain(app.url) ? `<p class="muted">Prepare form is being slowed for ${escapeHtml(activeThrottledDomain(app.url).domain || "this ATS")} until ${escapeHtml(activeThrottledDomain(app.url).next_allowed_at || "")}.</p>` : ""}
           <div>
             ${app.research_notes ? `<span class="tag">research saved</span>` : `<span class="tag">research needed</span>`}
             <span class="tag">quality ${escapeHtml(app.quality_score || 0)}</span>
             ${String(app.url || "").toLowerCase().includes("remoteok.com/remote-jobs/") ? `<span class="tag">board login wall</span>` : ""}
             ${app.manual_first ? `<span class="tag">manual-first ATS</span>` : ""}
             ${activeBlockedDomain(app.url) ? `<span class="tag">ats cooldown</span>` : ""}
+            ${!activeBlockedDomain(app.url) && activeThrottledDomain(app.url) ? `<span class="tag">ats rate limit</span>` : ""}
             ${app.form_prep_started_at ? `<span class="tag">form prep ${escapeHtml(app.form_prep_report?.status || "started")}</span>` : ""}
             ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
           </div>
@@ -8284,6 +8524,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
             <button class="btn primary" onclick="selectApplication(${app.id})">Edit</button>
             <button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>
             <button class="btn" onclick="resumeApplicationCard(${app.id})">Resume form</button>
+            <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">No thanks</button>
             ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">Open job</a>` : ""}
             <a class="btn" href="${mailto(app)}">Email draft</a>
           </div>
@@ -8633,6 +8874,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <button class="btn" onclick="prepareApplicationForm()">Prepare form</button>
           <button class="btn" onclick="resumeApplicationForm()">Resume form</button>
           <button class="btn warn" onclick="markApplicationSubmitted()">Mark submitted</button>
+          <button class="btn warn" onclick="rejectSelectedApplication()">No thanks</button>
           <a class="btn" href="${mailto(app)}">Open email draft</a>
           <button class="btn" onclick="sendFollowUp()">Send follow-up</button>
         </div>
@@ -9080,6 +9322,30 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       await load();
       showTab("applications");
       window.scrollTo({top: 0, behavior: "smooth"});
+    }
+
+    async function rejectApplication(id) {
+      const app = (state.applications || []).find(item => Number(item.id) === Number(id));
+      if (!app) return;
+      const confirmed = confirm(`Remove ${app.title || "this role"} at ${app.company || "this company"} and try to pull in a replacement?`);
+      if (!confirmed) return;
+      const result = await api("/api/applications/reject-and-replace", {method: "POST", body: JSON.stringify({id})});
+      const replacements = result.replacement_application_ids?.length || 0;
+      message(replacements
+        ? `Role removed. ${replacements} replacement draft${replacements === 1 ? "" : "s"} added to the current batch.`
+        : "Role removed. No safe replacement was available right now.");
+      selectedApplication = null;
+      await load();
+      showTab("applications");
+    }
+
+    async function rejectApplicationFromCard(id) {
+      await rejectApplication(id);
+    }
+
+    async function rejectSelectedApplication() {
+      if (!selectedApplication) return;
+      await rejectApplication(selectedApplication.id);
     }
 
     async function generateApplication(job_id) {

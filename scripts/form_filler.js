@@ -101,6 +101,36 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function isSensitivePlatform(platform) {
+  return ["smartrecruiters", "workday", "ashby", "greenhouse", "lever", "workable", "teamtailor"].includes(String(platform || "").toLowerCase());
+}
+
+function jitter(minMs, maxMs) {
+  const min = Math.max(0, Number(minMs) || 0);
+  const max = Math.max(min, Number(maxMs) || min);
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+async function pauseForPage(page, platform, phase = "default") {
+  const sensitive = isSensitivePlatform(platform);
+  const ranges = {
+    default: sensitive ? [900, 1800] : [350, 800],
+    beforeClick: sensitive ? [1100, 2300] : [450, 900],
+    afterClick: sensitive ? [1600, 3000] : [700, 1400],
+    beforeType: sensitive ? [700, 1500] : [250, 600],
+    afterType: sensitive ? [350, 900] : [150, 400],
+    afterNavigate: sensitive ? [2000, 3800] : [900, 1700]
+  };
+  const [min, max] = ranges[phase] || ranges.default;
+  await page.waitForTimeout(jitter(min, max)).catch(() => {});
+}
+
+async function settlePage(page, platform) {
+  await page.waitForLoadState("domcontentloaded", { timeout: 12000 }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: isSensitivePlatform(platform) ? 9000 : 4000 }).catch(() => {});
+  await pauseForPage(page, platform, "afterNavigate");
+}
+
 async function launchBestBrowser(report) {
   const base = {
     headless: false,
@@ -171,7 +201,9 @@ async function fillFirst(locator, value, label, report) {
     if (!count) return false;
     const target = locator.first();
     await target.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+    await pauseForPage(target.page(), report.platform || "", "beforeType");
     await target.fill(String(value), { timeout: 5000 });
+    await pauseForPage(target.page(), report.platform || "", "afterType");
     record(report.filled_fields, { prompt: label, value, kind: "heuristic" });
     console.log(`filled ${label}`);
     return true;
@@ -261,15 +293,15 @@ async function clickAndFollow(page, locator, report) {
   const popupPromise = context.waitForEvent("page", { timeout: 4000 }).catch(() => null);
   const currentUrl = page.url();
   await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await pauseForPage(page, report.platform || "", "beforeClick");
   await locator.click({ timeout: 5000 });
   const popup = await popupPromise;
   if (popup) {
-    await popup.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+    await settlePage(popup, report.platform || "");
     pushUnique(report.visited_urls, popup.url());
     return popup;
   }
-  await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
-  await page.waitForTimeout(1200);
+  await settlePage(page, report.platform || "");
   if (page.url() !== currentUrl) {
     pushUnique(report.visited_urls, page.url());
   }
@@ -277,7 +309,7 @@ async function clickAndFollow(page, locator, report) {
 }
 
 async function clickApplyIfPresent(page, report, platform) {
-  await page.waitForTimeout(1500).catch(() => {});
+  await settlePage(page, platform);
   const labels = [
     /apply for this job/i,
     /apply now/i,
@@ -414,8 +446,9 @@ async function revealExpandableSections(page, report, platform) {
       if (progressPatterns.some(pattern => pattern.test(text))) continue;
       if (!revealPatterns.some(pattern => pattern.test(text))) continue;
       await control.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+      await pauseForPage(page, platform, "beforeClick");
       await control.click({ timeout: 3000 }).catch(() => {});
-      await page.waitForTimeout(500).catch(() => {});
+      await pauseForPage(page, platform, "afterClick");
       revealed += 1;
       record(report.filled_fields, { prompt: `Expanded section`, value: text, kind: "expand" });
       if (revealed >= 4) break;
@@ -700,8 +733,9 @@ async function chooseComboboxOption(page, locator, value, report, prompt, catego
   for (const variant of variants) {
     try {
       await locator.fill("", { timeout: 3000 }).catch(() => {});
+      await pauseForPage(page, report.platform || "", "beforeType");
       await locator.type(variant, { delay: 35, timeout: 5000 }).catch(() => {});
-      await page.waitForTimeout(500).catch(() => {});
+      await pauseForPage(page, report.platform || "", "afterType");
       const exactOption = page.getByRole("option", { name: new RegExp(`^${escapeRegExp(variant)}$`, "i") }).first();
       if (await isVisible(exactOption)) {
         await exactOption.click({ timeout: 3000 });
@@ -1453,6 +1487,7 @@ async function preLoginIfConfigured(page, task, report, platform) {
   report.login.status = "prelogin";
   report.login.login_url = credential.login_url;
   await page.goto(credential.login_url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await settlePage(page, platform);
   pushUnique(report.visited_urls, page.url());
   if (!(await resolveBlockerIfPresent(page, task, report))) return false;
   const passwordField = page.locator('input[type="password"]').first();
@@ -1463,6 +1498,7 @@ async function preLoginIfConfigured(page, task, report, platform) {
     await attemptLoginIfNeeded(page, task, report);
   }
   await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await settlePage(page, platform);
   pushUnique(report.visited_urls, page.url());
   return true;
 }
@@ -1498,7 +1534,9 @@ async function attemptLoginIfNeeded(page, task, report) {
     'input[name*="login" i]'
   ], username, "login username selector", report);
   await passwordField.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await pauseForPage(page, report.platform || "", "beforeType");
   await passwordField.fill(password, { timeout: 5000 });
+  await pauseForPage(page, report.platform || "", "afterType");
   record(report.filled_fields, { prompt: "login password", value: "[saved in Keychain]", kind: "login" });
 
   const buttons = [
@@ -1513,6 +1551,7 @@ async function attemptLoginIfNeeded(page, task, report) {
     try {
       const button = page.getByRole("button", { name }).first();
       if (await button.count()) {
+        await pauseForPage(page, report.platform || "", "beforeClick");
         await button.click({ timeout: 5000 });
         clicked = true;
         break;
@@ -1522,11 +1561,11 @@ async function attemptLoginIfNeeded(page, task, report) {
     }
   }
   if (!clicked) {
+    await pauseForPage(page, report.platform || "", "beforeClick");
     await passwordField.press("Enter").catch(() => {});
   }
 
-  await page.waitForLoadState("domcontentloaded", { timeout: 12000 }).catch(() => {});
-  await page.waitForTimeout(2000);
+  await settlePage(page, report.platform || "");
   pushUnique(report.visited_urls, page.url());
   const blockerCleared = await resolveBlockerIfPresent(page, task, report);
   if (!blockerCleared) {
@@ -1561,9 +1600,9 @@ async function clickSafeContinue(page, report, platform) {
       if (submitPatterns.some(pattern => pattern.test(text))) continue;
       if (!progressPatterns.some(pattern => pattern.test(text))) continue;
       await control.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+      await pauseForPage(page, platform, "beforeClick");
       await control.click({ timeout: 5000 });
-      await page.waitForLoadState("domcontentloaded", { timeout: 12000 }).catch(() => {});
-      await page.waitForTimeout(1200);
+      await settlePage(page, platform);
       pushUnique(report.visited_urls, page.url());
       report.step_history.push({
         step: `advance:${report.step_history.length + 1}`,
@@ -1684,6 +1723,7 @@ async function main() {
       return;
     }
     await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await settlePage(page, platform);
     pushUnique(report.visited_urls, page.url());
     if (!(await resolveBlockerIfPresent(page, task, report))) {
       await saveSessionState(context, statePath, report);

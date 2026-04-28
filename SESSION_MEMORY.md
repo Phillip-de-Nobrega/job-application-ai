@@ -1,6 +1,24 @@
 # Session Memory
 
-Last updated: 2026-04-23
+Last updated: 2026-04-28
+
+## Latest Handoff
+
+- Local app URL now in active use: `http://127.0.0.1:8766`.
+- Local database backup created before tool updates: `data/backups/job_application_ai-20260428-093257.sqlite3`.
+- Current code state includes:
+  - generalized file/artifact upload handling across ATSs
+  - `Refresh with new options` in Applications
+  - Applications view filter: `Current batch`, `Active only`, `All`
+  - real `batch_id` support so `Current batch` reflects the latest generated set
+  - `No thanks` buttons on application cards and in the draft editor, with reject-and-replace behavior
+  - combobox/autocomplete handling
+  - expandable-section handling
+  - slower, jittered browser pacing on sensitive ATSs
+  - broader `manual-first ATS` policy
+  - per-domain ATS prep rate limits before the harder cooldown after restriction pages
+- Recent user-reported issue: some ATSs displayed restriction text such as `We detected unusual activity from your device or network`. The current direction is to reduce automation pace, enforce manual-first handling on sensitive ATSs, and rate-limit retries rather than trying to brute-force form prep.
+- Important current status: `app.py` and `scripts/form_filler.js` have uncommitted changes that should be committed before updating Codex or VS Code.
 
 ## Project Goal
 
@@ -40,7 +58,7 @@ The app must be review-first: it can fill and draft, but Phillip checks and clic
 
 - Project directory: `/Users/phillip/Desktop/JOB APPLICATION AI`.
 - Main app: `app.py`.
-- Local URL: `http://127.0.0.1:8765`.
+- Local URL: `http://127.0.0.1:8766`.
 - Database: `data/job_application_ai.sqlite3`.
 - Generated docs: `documents/`.
 - Local secrets: `.env` exists and is gitignored. Do not reveal its contents.
