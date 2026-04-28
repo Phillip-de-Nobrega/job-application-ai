@@ -8185,6 +8185,34 @@ Record:
       return labels[normalizeQueueState(app.queue_state)] || "needs review";
     }
 
+    function scannerKeywordSignals(job) {
+      const text = `${job.title || ""} ${job.description || ""}`.toLowerCase();
+      const terms = ["marketing", "brand", "campaign", "content", "social media", "community", "growth", "analytics", "events", "partnership", "seo", "paid media", "meta ads", "google analytics", "sport", "sports", "fitness", "wellness", "outdoor", "consumer"];
+      return terms.filter(term => text.includes(term)).slice(0, 10);
+    }
+
+    function draftKeywordCoverage(app, job) {
+      const haystack = `${app.cover_letter || ""}\n${app.answers || ""}\n${app.cv_notes || ""}`.toLowerCase();
+      const keywords = scannerKeywordSignals(job);
+      return {
+        matched: keywords.filter(term => haystack.includes(term)),
+        missing: keywords.filter(term => !haystack.includes(term)),
+      };
+    }
+
+    function safeForAutoApproval(app) {
+      const job = appJob(app);
+      return (
+        normalizeQueueState(app.queue_state) === "review" &&
+        !activeBlockedDomain(app.url) &&
+        !activeThrottledDomain(app.url) &&
+        Number(app.quality_score || 0) >= 70 &&
+        !(app.truthfulness_flags || "").trim() &&
+        !(job.concerns || "").trim() &&
+        missingApplicationItems(app).filter(item => !item.includes("contact")).length === 0
+      );
+    }
+
     function renderAutoApplyQueue() {
       const summary = document.getElementById("queueSummary");
       const batch = document.getElementById("queueBatch");
@@ -8266,6 +8294,9 @@ Record:
         <p class="muted">Use the queue like an approval board: move strong roles into Approved, park uncertain ones on Hold, and reject weak roles. Sensitive ATSs are intentionally slowed.</p>
         <div class="actions">
           <button class="btn primary" onclick="refreshApplicationQueue()">Pull next batch</button>
+          <button class="btn" onclick="approveSafeQueueRoles()">Approve safe roles</button>
+          <button class="btn" onclick="holdBlockedQueueRoles()">Hold blocked ATS roles</button>
+          <button class="btn" onclick="returnQueueToReview()">Reset queue to review</button>
           <button class="btn" onclick="showTab('discover')">Add more sources</button>
           <button class="btn" onclick="showTab('analytics')">Check source quality</button>
         </div>
@@ -8378,13 +8409,39 @@ Record:
         </div>
       `;
       appsTarget.innerHTML = apps.map(app => `
-        <div class="reminder">
-          <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
-          <div class="meta">Quality ${escapeHtml(app.quality_score || 0)} - ${escapeHtml(app.recommended_cv_version || "no CV recommendation")}</div>
-          <details><summary>Checklist</summary><pre>${escapeHtml(app.checklist || "No checklist generated yet.")}</pre></details>
-          <details><summary>Truthfulness / authorization flags</summary><pre>${escapeHtml(app.truthfulness_flags || "No truthfulness flags.")}</pre></details>
-          <details><summary>Quality notes</summary><pre>${escapeHtml(app.quality_notes || "No quality notes.")}</pre></details>
-        </div>
+        ${(() => {
+          const job = appJob(app);
+          const missing = missingApplicationItems(app);
+          const coverage = draftKeywordCoverage(app, job);
+          const concerns = String(job.concerns || "").trim();
+          const flags = String(app.truthfulness_flags || "").trim();
+          const next = nextApplicationAction(app);
+          return `
+            <div class="reminder">
+              <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
+              <div class="meta">Quality ${escapeHtml(app.quality_score || 0)} - Recommended CV ${escapeHtml(app.recommended_cv_version || "no CV recommendation")} - Queue ${escapeHtml(queueStateLabel(app))}</div>
+              <p class="muted">${escapeHtml(next)}</p>
+              <div class="actions">
+                <button class="btn primary" onclick="selectApplication(${app.id})">Open draft</button>
+                <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
+                <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
+              </div>
+              <details open><summary>Scanner summary</summary>
+                <ul>
+                  <li><strong>Role fit:</strong> ${escapeHtml(concerns ? "review concerns first" : "no major fit concerns in current scoring")}</li>
+                  <li><strong>Missing items:</strong> ${escapeHtml(missing.length ? missing.join(", ") : "none outside manual submit checks")}</li>
+                  <li><strong>Truth flags:</strong> ${escapeHtml(flags || "none")}</li>
+                  <li><strong>Keyword coverage:</strong> ${escapeHtml(coverage.matched.length ? coverage.matched.join(", ") : "no strong keyword overlap detected yet")}</li>
+                  <li><strong>Missing keywords:</strong> ${escapeHtml(coverage.missing.length ? coverage.missing.join(", ") : "none from the top scanner keywords")}</li>
+                </ul>
+              </details>
+              <details><summary>Checklist</summary><pre>${escapeHtml(app.checklist || "No checklist generated yet.")}</pre></details>
+              <details><summary>Truthfulness / authorization flags</summary><pre>${escapeHtml(flags || "No truthfulness flags.")}</pre></details>
+              <details><summary>Quality notes</summary><pre>${escapeHtml(app.quality_notes || "No quality notes.")}</pre></details>
+              ${concerns ? `<details><summary>Fit concerns</summary><pre>${escapeHtml(concerns)}</pre></details>` : ""}
+            </div>
+          `;
+        })()}
       `).join("") || `<p class="muted">No current batch to scan.</p>`;
       hotspots.innerHTML = `
         <div class="reminder">
@@ -8392,6 +8449,7 @@ Record:
           <p class="muted">${lowQuality.length ? `${lowQuality.length} draft(s) need stronger tailoring.` : "No major quality-score issues in the current batch."}</p>
           <p class="muted">${flagged.length ? `${flagged.length} draft(s) have truth/work-authorization flags to review manually.` : "No major truthfulness flags in the current batch."}</p>
           <p class="muted">${missingResearch.length ? `${missingResearch.length} draft(s) still need company research.` : "Research coverage looks acceptable for the current batch."}</p>
+          <p class="muted">${apps.filter(app => safeForAutoApproval(app)).length} draft(s) look safe enough to move straight into Approved.</p>
         </div>
       `;
     }
@@ -9988,6 +10046,52 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       if (selectedApplication && Number(selectedApplication.id) === Number(id)) {
         selectApplication(id, false);
       }
+    }
+
+    async function approveSafeQueueRoles() {
+      const ids = currentBatchApplications().filter(app => safeForAutoApproval(app)).map(app => app.id);
+      if (!ids.length) {
+        message("No current-batch roles meet the safe auto-approval rule right now.");
+        return;
+      }
+      for (const id of ids) {
+        await api("/api/applications/queue-state", {method: "POST", body: JSON.stringify({id, queue_state: "approved"})});
+      }
+      message(`Approved ${ids.length} safe role${ids.length === 1 ? "" : "s"} in the current batch.`);
+      await load();
+      showTab("auto_apply_queue");
+    }
+
+    async function holdBlockedQueueRoles() {
+      const ids = currentBatchApplications()
+        .filter(app => activeBlockedDomain(app.url) || activeThrottledDomain(app.url))
+        .map(app => app.id);
+      if (!ids.length) {
+        message("No blocked or throttled roles need to be moved to hold.");
+        return;
+      }
+      for (const id of ids) {
+        await api("/api/applications/queue-state", {method: "POST", body: JSON.stringify({id, queue_state: "hold"})});
+      }
+      message(`Moved ${ids.length} blocked/throttled role${ids.length === 1 ? "" : "s"} to hold.`);
+      await load();
+      showTab("auto_apply_queue");
+    }
+
+    async function returnQueueToReview() {
+      const ids = currentBatchApplications()
+        .filter(app => normalizeQueueState(app.queue_state) !== "review")
+        .map(app => app.id);
+      if (!ids.length) {
+        message("Current batch is already fully in review.");
+        return;
+      }
+      for (const id of ids) {
+        await api("/api/applications/queue-state", {method: "POST", body: JSON.stringify({id, queue_state: "review"})});
+      }
+      message(`Returned ${ids.length} role${ids.length === 1 ? "" : "s"} to review.`);
+      await load();
+      showTab("auto_apply_queue");
     }
 
     async function rejectApplication(id) {
