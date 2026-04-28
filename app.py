@@ -7253,8 +7253,26 @@ INDEX_HTML = r"""<!doctype html>
     .muted { color: var(--muted); }
     a { color: #075985; }
     .hidden { display: none; }
+    .tool-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .tool-card {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 130px;
+    }
+    .tool-card h3 { font-size: 16px; margin-bottom: 6px; }
+    .hero-copy {
+      display: grid;
+      gap: 10px;
+    }
     @media (max-width: 920px) {
-      .grid, .row, .metric-grid { grid-template-columns: 1fr; }
+      .grid, .row, .metric-grid, .tool-grid { grid-template-columns: 1fr; }
       .job { grid-template-columns: 1fr; }
       .score { width: 60px; height: 60px; }
     }
@@ -7265,17 +7283,21 @@ INDEX_HTML = r"""<!doctype html>
     <div class="topbar">
       <div>
         <h1>Job Application AI</h1>
-        <div class="sub">Local, supervised marketing job assistant</div>
+        <div class="sub">Local, supervised graduate-marketing job workspace</div>
       </div>
       <nav>
-        <button data-tab="dashboard" class="active">Dashboard</button>
+        <button data-tab="dashboard" class="active">Home</button>
+        <button data-tab="auto_apply_queue">Auto Apply Queue</button>
+        <button data-tab="resume_lab">Resume Lab</button>
+        <button data-tab="ats_scanner">ATS Scanner</button>
+        <button data-tab="interview_prep">Interview Prep</button>
         <button data-tab="profile">Profile</button>
         <button data-tab="discover">Discover</button>
         <button data-tab="targets">Targets</button>
         <button data-tab="jobs">Jobs</button>
         <button data-tab="applications">Applications</button>
         <button data-tab="outreach">Outreach</button>
-        <button data-tab="auto">Auto Mode</button>
+        <button data-tab="auto">Ops</button>
         <button data-tab="analytics">Analytics</button>
         <button data-tab="email">Email</button>
         <button data-tab="session">Session</button>
@@ -7290,16 +7312,38 @@ INDEX_HTML = r"""<!doctype html>
       <div class="notice">
         This assistant prepares and tracks applications. It stops before final submission and does not bypass CAPTCHA, login, rate limits, or platform restrictions.
       </div>
+      <div class="tool-grid">
+        <div class="tool-card">
+          <h3>Auto Apply Queue</h3>
+          <p class="muted">Review the active batch, reject weak roles, and prepare strong applications one by one.</p>
+          <div class="actions"><button class="btn primary" onclick="showTab('auto_apply_queue')">Open queue</button></div>
+        </div>
+        <div class="tool-card">
+          <h3>Resume Lab</h3>
+          <p class="muted">Manage CV versions, tailored briefs, and reusable application documents.</p>
+          <div class="actions"><button class="btn primary" onclick="showTab('resume_lab')">Open resume lab</button></div>
+        </div>
+        <div class="tool-card">
+          <h3>ATS Scanner</h3>
+          <p class="muted">Review application quality, checklist gaps, truthfulness flags, and ATS readiness.</p>
+          <div class="actions"><button class="btn primary" onclick="showTab('ats_scanner')">Open scanner</button></div>
+        </div>
+        <div class="tool-card">
+          <h3>Interview Prep</h3>
+          <p class="muted">Keep answer stories, recruiter reply signals, and interview-stage applications in one place.</p>
+          <div class="actions"><button class="btn primary" onclick="showTab('interview_prep')">Open prep</button></div>
+        </div>
+      </div>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Today</h2>
+            <h2>Workspace Overview</h2>
             <div id="summary"></div>
             <div class="actions">
               <button class="btn primary" onclick="runDailyWorkflow()">Run daily workflow</button>
               <button class="btn primary" onclick="showTab('discover')">Find roles</button>
-              <button class="btn" onclick="showTab('jobs')">Review queue</button>
-              <button class="btn" onclick="showTab('applications')">Application drafts</button>
+              <button class="btn" onclick="showTab('auto_apply_queue')">Review queue</button>
+              <button class="btn" onclick="showTab('resume_lab')">Resume lab</button>
             </div>
           </div>
           <div class="panel">
@@ -7314,6 +7358,114 @@ INDEX_HTML = r"""<!doctype html>
         <div class="panel">
           <h2>Source Health</h2>
           <div id="dashboardSourceHealth"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="auto_apply_queue">
+      <div class="grid">
+        <div>
+          <div class="panel">
+            <h2>Auto Apply Queue</h2>
+            <p class="muted">This is the live queue for supervised applications. Refresh for a new batch, reject weak roles, then prepare the strongest ones in a visible browser.</p>
+            <div class="actions">
+              <button class="btn primary" onclick="refreshApplicationQueue()">Refresh with new options</button>
+              <button class="btn" onclick="showTab('applications')">Open full draft editor</button>
+            </div>
+            <div id="queueSummary"></div>
+          </div>
+          <div class="panel">
+            <h2>Current Batch</h2>
+            <div id="queueBatch"></div>
+          </div>
+        </div>
+        <div>
+          <div class="panel">
+            <h2>ATS Status</h2>
+            <div id="queueDomainHealth"></div>
+          </div>
+          <div class="panel">
+            <h2>Batch Controls</h2>
+            <div id="queueControls"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="resume_lab">
+      <div class="grid">
+        <div>
+          <div class="panel">
+            <h2>Resume Lab</h2>
+            <p class="muted">Keep your main CV, tailored variants, and reusable career documents in one place.</p>
+            <div id="resumeLabSummary"></div>
+          </div>
+          <div class="panel">
+            <h2>CV Versions</h2>
+            <div id="resumeLabCvVersions"></div>
+          </div>
+          <div class="panel">
+            <h2>Tailored Drafts</h2>
+            <div id="resumeLabDrafts"></div>
+          </div>
+        </div>
+        <div>
+          <div class="panel">
+            <h2>Profile Snapshot</h2>
+            <div id="resumeLabProfile"></div>
+          </div>
+          <div class="panel">
+            <h2>Writing Voice</h2>
+            <div id="resumeLabVoice"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="ats_scanner">
+      <div class="grid">
+        <div>
+          <div class="panel">
+            <h2>ATS Scanner</h2>
+            <p class="muted">Review readiness before you spend time preparing a live form.</p>
+            <div id="scannerOverview"></div>
+          </div>
+          <div class="panel">
+            <h2>Application Readiness</h2>
+            <div id="scannerApplications"></div>
+          </div>
+        </div>
+        <div>
+          <div class="panel">
+            <h2>Quality Hotspots</h2>
+            <div id="scannerHotspots"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="interview_prep">
+      <div class="grid">
+        <div>
+          <div class="panel">
+            <h2>Interview Prep</h2>
+            <p class="muted">Track interview-stage roles, recruiter reply signals, and reusable answer stories.</p>
+            <div id="interviewPrepOverview"></div>
+          </div>
+          <div class="panel">
+            <h2>Interview Signals</h2>
+            <div id="interviewPrepSignals"></div>
+          </div>
+          <div class="panel">
+            <h2>Answer Bank</h2>
+            <div id="interviewPrepAnswers"></div>
+          </div>
+        </div>
+        <div>
+          <div class="panel">
+            <h2>Story Bank</h2>
+            <div id="interviewPrepStories"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -7850,6 +8002,10 @@ Record:
       state = await api("/api/state");
       renderProfile();
       renderDashboard();
+      renderAutoApplyQueue();
+      renderResumeLab();
+      renderAtsScanner();
+      renderInterviewPrep();
       renderEmail();
       renderJobs();
       renderApplications();
@@ -7900,6 +8056,199 @@ Record:
       `;
       renderDailyReview();
       showReminderPopup(reminders);
+    }
+
+    function currentBatchApplications() {
+      const completedStatuses = new Set(["submitted", "interview", "offer", "rejected"]);
+      const activeApps = (state.applications || []).filter(app => !completedStatuses.has(String(app.status || "draft")));
+      const latestBatchId = activeApps.reduce((latest, app) => {
+        const batchId = String(app.batch_id || "");
+        if (!batchId) return latest;
+        return !latest || batchId > latest ? batchId : latest;
+      }, "");
+      return latestBatchId ? activeApps.filter(app => String(app.batch_id || "") === latestBatchId) : activeApps.slice(0, 5);
+    }
+
+    function renderAutoApplyQueue() {
+      const summary = document.getElementById("queueSummary");
+      const batch = document.getElementById("queueBatch");
+      const health = document.getElementById("queueDomainHealth");
+      const controls = document.getElementById("queueControls");
+      if (!summary || !batch || !health || !controls) return;
+      const apps = currentBatchApplications();
+      const ready = apps.filter(app => !activeBlockedDomain(app.url) && !activeThrottledDomain(app.url)).length;
+      summary.innerHTML = `
+        <div class="metric-grid">
+          ${metric("Current batch", apps.length, "latest generated set")}
+          ${metric("Ready", ready, "not blocked or throttled")}
+          ${metric("Needs review", apps.filter(app => missingApplicationItems(app).length).length, "missing draft items or fit checks")}
+          ${metric("Prepared", apps.filter(app => app.form_prep_started_at).length, "live form prep started")}
+        </div>
+      `;
+      batch.innerHTML = apps.map(app => {
+        const job = appJob(app);
+        return `
+          <div class="reminder">
+            <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
+            <div class="meta">Score ${escapeHtml(job.score ?? "n/a")} - quality ${escapeHtml(app.quality_score || 0)} - ${escapeHtml(app.location || "Location not listed")}</div>
+            <p class="muted">${escapeHtml(nextApplicationAction(app))}</p>
+            <div>
+              ${app.manual_first ? `<span class="tag">manual-first ATS</span>` : ""}
+              ${activeBlockedDomain(app.url) ? `<span class="tag">ats cooldown</span>` : ""}
+              ${!activeBlockedDomain(app.url) && activeThrottledDomain(app.url) ? `<span class="tag">ats rate limit</span>` : ""}
+              ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
+            </div>
+            <div class="actions">
+              <button class="btn primary" onclick="selectApplication(${app.id})">Edit draft</button>
+              <button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>
+              <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">No thanks</button>
+            </div>
+          </div>
+        `;
+      }).join("") || `<p class="muted">No current batch yet. Refresh the queue after discovery finds stronger graduate-level roles.</p>`;
+      const blocked = blockedDomainSummaryHtml();
+      const throttled = throttledDomainSummaryHtml();
+      health.innerHTML = `
+        <h3>Cooldowns</h3>
+        ${blocked}
+        <h3 style="margin-top:16px">Pacing Limits</h3>
+        ${throttled}
+      `;
+      controls.innerHTML = `
+        <p class="muted">Use the queue like an approval board: reject weak roles quickly, then prepare only the strongest ones. Sensitive ATSs are intentionally slowed.</p>
+        <div class="actions">
+          <button class="btn primary" onclick="refreshApplicationQueue()">Pull next batch</button>
+          <button class="btn" onclick="showTab('discover')">Add more sources</button>
+          <button class="btn" onclick="showTab('analytics')">Check source quality</button>
+        </div>
+      `;
+    }
+
+    function renderResumeLab() {
+      const summary = document.getElementById("resumeLabSummary");
+      const cvs = document.getElementById("resumeLabCvVersions");
+      const drafts = document.getElementById("resumeLabDrafts");
+      const profile = document.getElementById("resumeLabProfile");
+      const voice = document.getElementById("resumeLabVoice");
+      if (!summary || !cvs || !drafts || !profile || !voice) return;
+      const cvVersions = state.cv_versions || [];
+      const apps = currentBatchApplications();
+      summary.innerHTML = `
+        <div class="metric-grid">
+          ${metric("CV versions", cvVersions.length, "saved variants")}
+          ${metric("Current drafts", apps.length, "active batch")}
+          ${metric("Tailored briefs", apps.filter(app => app.recommended_cv_version).length, "recommended CV guidance")}
+          ${metric("Writing sample", state.profile.writing_sample_text ? "Loaded" : "Missing", state.profile.writing_sample_path || "no source path")}
+        </div>
+      `;
+      cvs.innerHTML = cvVersions.map(cv => `
+        <div class="reminder">
+          <h3>${escapeHtml(cv.name || "CV version")}</h3>
+          <div class="meta">${escapeHtml(cv.focus || "")}${cv.is_default ? " - default" : ""}</div>
+          <p>${escapeHtml(cv.notes || "")}</p>
+        </div>
+      `).join("") || `<p class="muted">No CV versions saved yet.</p>`;
+      drafts.innerHTML = apps.map(app => `
+        <div class="reminder">
+          <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
+          <div class="meta">Recommended CV: ${escapeHtml(app.recommended_cv_version || "not assessed yet")}</div>
+          <p class="muted">${escapeHtml((app.cv_notes || "").slice(0, 260) || "No CV notes generated yet.")}</p>
+          <div class="actions">
+            <button class="btn primary" onclick="selectApplication(${app.id})">Open draft</button>
+            <button class="btn" onclick="showTab('applications')">Edit documents</button>
+          </div>
+        </div>
+      `).join("") || `<p class="muted">No active application drafts to tailor right now.</p>`;
+      profile.innerHTML = `
+        <p><strong>${escapeHtml(state.profile.full_name || "")}</strong></p>
+        <p class="meta">${escapeHtml(state.profile.location || "")}</p>
+        <p class="meta">${escapeHtml(state.profile.email || "")} - ${escapeHtml(state.profile.phone || "")}</p>
+        <p>${escapeHtml(state.profile.target_roles || "")}</p>
+      `;
+      voice.innerHTML = `
+        <p><strong>Email/CV voice</strong></p>
+        <p class="muted">${escapeHtml(state.profile.email_voice || "")}</p>
+        <p><strong>Writing style notes</strong></p>
+        <pre>${escapeHtml(state.profile.writing_style_notes || "No extracted style notes yet.")}</pre>
+      `;
+    }
+
+    function renderAtsScanner() {
+      const overview = document.getElementById("scannerOverview");
+      const appsTarget = document.getElementById("scannerApplications");
+      const hotspots = document.getElementById("scannerHotspots");
+      if (!overview || !appsTarget || !hotspots) return;
+      const apps = currentBatchApplications();
+      const lowQuality = apps.filter(app => Number(app.quality_score || 0) < 70);
+      const flagged = apps.filter(app => (app.truthfulness_flags || "").trim());
+      const missingResearch = apps.filter(app => !(app.research_notes || "").trim());
+      overview.innerHTML = `
+        <div class="metric-grid">
+          ${metric("Scanned drafts", apps.length, "current batch")}
+          ${metric("Low quality", lowQuality.length, "quality score under 70")}
+          ${metric("Truth flags", flagged.length, "work authorization or truth checks")}
+          ${metric("Research gaps", missingResearch.length, "research still needed")}
+        </div>
+      `;
+      appsTarget.innerHTML = apps.map(app => `
+        <div class="reminder">
+          <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
+          <div class="meta">Quality ${escapeHtml(app.quality_score || 0)} - ${escapeHtml(app.recommended_cv_version || "no CV recommendation")}</div>
+          <details><summary>Checklist</summary><pre>${escapeHtml(app.checklist || "No checklist generated yet.")}</pre></details>
+          <details><summary>Truthfulness / authorization flags</summary><pre>${escapeHtml(app.truthfulness_flags || "No truthfulness flags.")}</pre></details>
+          <details><summary>Quality notes</summary><pre>${escapeHtml(app.quality_notes || "No quality notes.")}</pre></details>
+        </div>
+      `).join("") || `<p class="muted">No current batch to scan.</p>`;
+      hotspots.innerHTML = `
+        <div class="reminder">
+          <h3>What to fix first</h3>
+          <p class="muted">${lowQuality.length ? `${lowQuality.length} draft(s) need stronger tailoring.` : "No major quality-score issues in the current batch."}</p>
+          <p class="muted">${flagged.length ? `${flagged.length} draft(s) have truth/work-authorization flags to review manually.` : "No major truthfulness flags in the current batch."}</p>
+          <p class="muted">${missingResearch.length ? `${missingResearch.length} draft(s) still need company research.` : "Research coverage looks acceptable for the current batch."}</p>
+        </div>
+      `;
+    }
+
+    function renderInterviewPrep() {
+      const overview = document.getElementById("interviewPrepOverview");
+      const signals = document.getElementById("interviewPrepSignals");
+      const answers = document.getElementById("interviewPrepAnswers");
+      const stories = document.getElementById("interviewPrepStories");
+      if (!overview || !signals || !answers || !stories) return;
+      const apps = state.applications || [];
+      const interviewApps = apps.filter(app => ["interview", "offer"].includes(app.status));
+      const messages = state.inbox_messages || [];
+      const interviewSignals = messages.filter(item => item.classification === "interview");
+      overview.innerHTML = `
+        <div class="metric-grid">
+          ${metric("Interview-stage apps", interviewApps.length, "status interview/offer")}
+          ${metric("Inbox interview signals", interviewSignals.length, "reply tracking")}
+          ${metric("Answer bank", (state.answer_bank || []).length, "saved default answers")}
+          ${metric("Story bank", (state.story_bank || []).length, "proof stories")}
+        </div>
+      `;
+      signals.innerHTML = interviewSignals.map(item => `
+        <div class="reminder">
+          <h3>${escapeHtml(item.subject || "(no subject)")}</h3>
+          <div class="meta">${escapeHtml(item.from_name || "")} ${escapeHtml(item.from_email || "")}</div>
+          <pre>${escapeHtml(item.snippet || "")}</pre>
+        </div>
+      `).join("") || `<p class="muted">No interview signals tracked yet.</p>`;
+      answers.innerHTML = (state.answer_bank || []).slice(0, 10).map(item => `
+        <div class="reminder">
+          <h3>${escapeHtml(item.question || item.question_key || "Answer")}</h3>
+          <div class="meta">${escapeHtml(item.category || "")}</div>
+          <p>${escapeHtml(item.answer || "")}</p>
+        </div>
+      `).join("") || `<p class="muted">No saved interview/application answers yet.</p>`;
+      stories.innerHTML = (state.story_bank || []).slice(0, 10).map(item => `
+        <div class="reminder">
+          <h3>${escapeHtml(item.title || "Story")}</h3>
+          <div class="meta">${escapeHtml(item.category || "")}</div>
+          <p>${escapeHtml(item.story || "")}</p>
+          <p class="muted">${escapeHtml(item.proof_points || "")}</p>
+        </div>
+      `).join("") || `<p class="muted">No story bank entries yet.</p>`;
     }
 
     function dailyReviewApplications() {
