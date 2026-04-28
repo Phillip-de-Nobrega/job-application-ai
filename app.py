@@ -8340,6 +8340,7 @@ Record:
           <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
           <div class="meta">Recommended CV: ${escapeHtml(app.recommended_cv_version || "not assessed yet")}</div>
           <p class="muted">${escapeHtml((app.cv_notes || "").slice(0, 260) || "No CV notes generated yet.")}</p>
+          <details><summary>CV tailoring diff</summary>${cvTailoringDiffHtml(app)}</details>
           <div class="actions">
             <button class="btn primary" onclick="selectApplication(${app.id})">Open draft</button>
             <button class="btn" onclick="showTab('applications')">Edit documents</button>
@@ -9530,6 +9531,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         <h3 style="margin-top:18px">Latest Form Prep Report</h3>
         ${formPrepSummary(app)}
         <details><summary>Tailored CV brief preview</summary><pre>${escapeHtml(tailoredCvPreview(app))}</pre></details>
+        <details><summary>CV tailoring diff</summary>${cvTailoringDiffHtml(app)}</details>
         <label>Cover letter</label><textarea id="edit_cover_letter" style="min-height:220px">${escapeHtml(app.cover_letter || "")}</textarea>
         <label>CV notes</label><textarea id="edit_cv_notes">${escapeHtml(app.cv_notes || "")}</textarea>
         <label>Questionnaire answers</label><textarea id="edit_answers" style="min-height:220px">${escapeHtml(app.answers || "")}</textarea>
@@ -9605,6 +9607,60 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       const text = `${job.title || ""} ${job.description || ""}`.toLowerCase();
       const terms = ["marketing", "brand", "campaign", "content", "social media", "community", "growth", "analytics", "paid media", "events", "partnership", "sport", "fitness", "outdoor", "wellness", "consumer"];
       return terms.filter(term => text.includes(term)).slice(0, 12);
+    }
+
+    function cvEvidenceBullets(job) {
+      const text = `${job.title || ""} ${job.description || ""}`.toLowerCase();
+      const bullets = [
+        "UCT Business Science Marketing graduate with 75%+ average and honours-equivalent final year.",
+        "Google Analytics certified, with market research, consumer behaviour, and strategic marketing training.",
+      ];
+      if (["content", "social", "instagram", "tiktok", "creative"].some(term => text.includes(term))) {
+        bullets.push("Cookie Factory content work: Canva graphics, captions, scheduling, short-form content, and engagement reporting.");
+      }
+      if (["research", "analytics", "insight", "data", "survey"].some(term => text.includes(term))) {
+        bullets.push("Research evidence: UCT thesis on VR/AR adoption plus Look@ / SIGMUND market research work.");
+      }
+      if (["sport", "fitness", "outdoor", "wellness", "athlete", "training"].some(term => text.includes(term))) {
+        bullets.push("Sport/fitness link: coaching, Ironman 70.3 training, and a self-built triathlon/gym training app.");
+      }
+      if (["startup", "growth", "product", "ai", "automation", "app"].some(term => text.includes(term))) {
+        bullets.push("Startup/product angle: AI-assisted training app work with practical iteration and user-focus.");
+      }
+      if (["event", "community", "activation", "partnership"].some(term => text.includes(term))) {
+        bullets.push("Community/event evidence: coaching and school tournament coordination with visible audience-facing responsibility.");
+      }
+      return Array.from(new Set(bullets)).slice(0, 7);
+    }
+
+    function cvTailoringDiffHtml(app) {
+      const job = appJob(app);
+      const version = app.recommended_cv_version || "General marketing CV";
+      const keywords = cvKeywords(job);
+      const coverage = draftKeywordCoverage(app, job);
+      const bullets = cvEvidenceBullets(job);
+      return `
+        <div class="reminder">
+          <div class="meta">Recommended CV: ${escapeHtml(version)}</div>
+          <p>${escapeHtml(cvSummaryForVersion(version, app.company || "the company"))}</p>
+          <div class="row">
+            <div>
+              <strong>Matched keywords</strong>
+              <p class="muted">${escapeHtml(coverage.matched.length ? coverage.matched.join(", ") : "No strong keyword overlap detected in the current draft yet.")}</p>
+            </div>
+            <div>
+              <strong>Still missing</strong>
+              <p class="muted">${escapeHtml(coverage.missing.length ? coverage.missing.join(", ") : "None from the main job keywords.")}</p>
+            </div>
+          </div>
+          <strong>Evidence to emphasise</strong>
+          <ul>
+            ${bullets.map(bullet => `<li>${escapeHtml(bullet)}</li>`).join("")}
+          </ul>
+          <strong>Top role keywords</strong>
+          <p class="muted">${escapeHtml(keywords.length ? keywords.join(", ") : "No clear marketing keywords detected in the job text.")}</p>
+        </div>
+      `;
     }
 
     async function saveProfile() {
