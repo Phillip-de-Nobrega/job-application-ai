@@ -26,6 +26,10 @@ function shortText(value, limit = 160) {
   return clean.length > limit ? `${clean.slice(0, limit - 1)}...` : clean;
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function normalizePromptKey(value) {
   return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -179,6 +183,13 @@ async function fillFirst(locator, value, label, report) {
 function matcher(pattern) {
   if (pattern instanceof RegExp) return pattern;
   return new RegExp(String(pattern), "i");
+}
+
+function preferredAnswerValue(category, answer) {
+  const raw = String(answer?.choice || answer?.value || "").trim();
+  if (!raw) return "";
+  if (category === "location") return raw.split(",")[0].trim() || raw;
+  return raw;
 }
 
 async function fillByLabels(page, labels, value, label, report) {
@@ -364,6 +375,55 @@ async function clickApplyIfPresent(page, report, platform) {
     }
   }
   return page;
+}
+
+async function revealExpandableSections(page, report, platform) {
+  const revealPatterns = [
+    /show more/i,
+    /view more/i,
+    /expand/i,
+    /add another/i,
+    /add more/i,
+    /add experience/i,
+    /add education/i,
+    /additional information/i,
+    /application questions/i,
+    /resume details/i,
+    /contact details/i,
+    /personal information/i
+  ];
+  const submitPatterns = finalSubmitPatterns();
+  const progressPatterns = stepPatternsForPlatform(platform);
+  const controls = page.locator('summary, button[aria-expanded="false"], [role="button"][aria-expanded="false"], button, [role="button"]');
+  const count = Math.min(await controls.count().catch(() => 0), 25);
+  let revealed = 0;
+  const seenTexts = new Set();
+  for (let i = 0; i < count; i += 1) {
+    const control = controls.nth(i);
+    try {
+      if (!(await isVisible(control))) continue;
+      const disabled = await control.isDisabled().catch(() => false);
+      if (disabled) continue;
+      const text = shortText(await control.evaluate((node) => {
+        const label = node.innerText || node.textContent || node.getAttribute("aria-label") || "";
+        return String(label || "").replace(/\s+/g, " ").trim();
+      }).catch(() => ""), 120);
+      if (!text || seenTexts.has(text)) continue;
+      seenTexts.add(text);
+      if (submitPatterns.some(pattern => pattern.test(text))) continue;
+      if (progressPatterns.some(pattern => pattern.test(text))) continue;
+      if (!revealPatterns.some(pattern => pattern.test(text))) continue;
+      await control.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+      await control.click({ timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(500).catch(() => {});
+      revealed += 1;
+      record(report.filled_fields, { prompt: `Expanded section`, value: text, kind: "expand" });
+      if (revealed >= 4) break;
+    } catch (error) {
+      // Continue.
+    }
+  }
+  return revealed;
 }
 
 async function fillProfileFields(page, task, report) {
@@ -580,6 +640,121 @@ async function answerCommonScreening(page, task, report) {
   await chooseRadioOrCheckbox(page, ["prefer not", "decline to self", "i do not wish"], "prefer not to answer", report);
   await fillByLabels(page, ["work authorization", "right to work", "visa"], profile.work_authorization, "work authorization", report);
   await fillByLabels(page, ["salary expectation", "expected salary", "compensation"], profile.salary_expectation, "salary expectation", report);
+}
+
+async function scanComboboxFields(page) {
+  return page.locator('input[role="combobox"], input[aria-autocomplete], [role="combobox"] input').evaluateAll((nodes) => {
+    function clean(value) {
+      return String(value || "").replace(/\s+/g, " ").trim();
+    }
+    function isVisible(node) {
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.visibility !== "hidden"
+        && style.display !== "none"
+        && Number(style.opacity || "1") !== 0
+        && rect.width > 0
+        && rect.height > 0;
+    }
+    function labelFor(node) {
+      const parts = [];
+      const id = node.id;
+      if (id) {
+        document.querySelectorAll(`label[for="${CSS.escape(id)}"]`).forEach(label => parts.push(clean(label.textContent)));
+      }
+      const closestLabel = node.closest("label");
+      if (closestLabel) parts.push(clean(closestLabel.textContent));
+      const fieldset = node.closest("fieldset");
+      const legend = fieldset ? clean(fieldset.querySelector("legend")?.textContent || "") : "";
+      if (legend) parts.push(legend);
+      const parentText = clean(node.parentElement?.textContent || "");
+      if (parentText && parentText.length < 180) parts.push(parentText);
+      parts.push(clean(node.getAttribute("aria-label")));
+      parts.push(clean(node.getAttribute("placeholder")));
+      return clean(parts.filter(Boolean).join(" | "));
+    }
+    return nodes.map((node, index) => ({
+      index,
+      prompt: labelFor(node),
+      name: clean(node.getAttribute("name")),
+      id: clean(node.id),
+      placeholder: clean(node.getAttribute("placeholder")),
+      currentValue: clean(node.value || ""),
+      required: node.required || clean(node.getAttribute("aria-required")) === "true",
+      disabled: node.disabled,
+      visible: isVisible(node)
+    })).filter(item => item.visible && !item.disabled);
+  });
+}
+
+async function chooseComboboxOption(page, locator, value, report, prompt, category) {
+  const desired = preferredAnswerValue(category, { value });
+  if (!desired) return false;
+  const variants = Array.from(new Set([
+    desired,
+    desired.split(",")[0].trim(),
+    desired.split(",").slice(0, 2).join(",").trim()
+  ].filter(Boolean)));
+  await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await locator.click({ timeout: 3000 }).catch(() => {});
+  for (const variant of variants) {
+    try {
+      await locator.fill("", { timeout: 3000 }).catch(() => {});
+      await locator.type(variant, { delay: 35, timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(500).catch(() => {});
+      const exactOption = page.getByRole("option", { name: new RegExp(`^${escapeRegExp(variant)}$`, "i") }).first();
+      if (await isVisible(exactOption)) {
+        await exactOption.click({ timeout: 3000 });
+        record(report.filled_fields, { prompt, value: variant, category, kind: "combobox" });
+        return true;
+      }
+      const partialOption = page.getByRole("option", { name: new RegExp(escapeRegExp(variant), "i") }).first();
+      if (await isVisible(partialOption)) {
+        await partialOption.click({ timeout: 3000 });
+        record(report.filled_fields, { prompt, value: variant, category, kind: "combobox" });
+        return true;
+      }
+      await locator.press("ArrowDown").catch(() => {});
+      await locator.press("Enter").catch(() => {});
+      await page.waitForTimeout(250).catch(() => {});
+      const currentValue = await locator.inputValue({ timeout: 1000 }).catch(() => "");
+      if (currentValue && currentValue.toLowerCase().includes(variant.toLowerCase().split(",")[0])) {
+        record(report.filled_fields, { prompt, value: currentValue, category, kind: "combobox" });
+        return true;
+      }
+    } catch (error) {
+      // Continue.
+    }
+  }
+  return false;
+}
+
+async function fillComboboxFields(page, task, report) {
+  const fields = await scanComboboxFields(page).catch(() => []);
+  if (!fields.length) return;
+  const locators = page.locator('input[role="combobox"], input[aria-autocomplete], [role="combobox"] input');
+  for (const field of fields) {
+    const prompt = field.prompt || field.name || field.id || "Combobox";
+    const category = classifyField({ ...field, tag: "input", type: "text" });
+    if (!category) continue;
+    if (String(field.currentValue || "").trim()) continue;
+    const answer = answerForCategory(category, field, task);
+    const desired = preferredAnswerValue(category, answer);
+    if (!desired) continue;
+    const locator = locators.nth(field.index);
+    try {
+      const filled = await chooseComboboxOption(page, locator, desired, report, prompt, category);
+      if (filled && answer.review) {
+        record(report.review_fields, { prompt, category, value: desired, reason: answer.reason || "Review this combobox selection before submit." });
+      } else if (!filled && field.required) {
+        record(report.review_fields, { prompt, category, reason: "Could not safely resolve this autocomplete/combobox field." });
+      }
+    } catch (error) {
+      if (field.required) {
+        record(report.review_fields, { prompt, category, reason: error.message });
+      }
+    }
+  }
 }
 
 async function uploadCv(page, task, report) {
@@ -1404,21 +1579,25 @@ async function clickSafeContinue(page, report, platform) {
 }
 
 async function fillCurrentStep(page, task, report, stepLabel) {
+  await revealExpandableSections(page, report, report.platform || "");
   await fillProfileFields(page, task, report);
   await uploadCv(page, task, report);
   await uploadCoverLetter(page, task, report);
   await uploadHeadshot(page, task, report);
   await fillTextAreas(page, task, report);
   await answerCommonScreening(page, task, report);
+  await fillComboboxFields(page, task, report);
   let fields = await fillScannedFields(page, task, report, stepLabel);
   if (!fields.length && !report.clicked_apply && ["ashby", "greenhouse", "lever", "smartrecruiters", "workable", "teamtailor"].includes(report.platform || "")) {
     page = await clickApplyIfPresent(page, report, report.platform || "");
+    await revealExpandableSections(page, report, report.platform || "");
     await fillProfileFields(page, task, report);
     await uploadCv(page, task, report);
     await uploadCoverLetter(page, task, report);
     await uploadHeadshot(page, task, report);
     await fillTextAreas(page, task, report);
     await answerCommonScreening(page, task, report);
+    await fillComboboxFields(page, task, report);
     fields = await fillScannedFields(page, task, report, `${stepLabel}-after-apply`);
   }
   return { page, fields };
@@ -1534,7 +1713,7 @@ async function main() {
     await attemptLoginIfNeeded(page, task, report);
     await saveSessionState(context, statePath, report);
     let lastFingerprint = "";
-    for (let step = 1; step <= 4; step += 1) {
+    for (let step = 1; step <= 6; step += 1) {
       const stepResult = await fillCurrentStep(page, task, report, `step-${step}`);
       page = stepResult.page;
       const fields = stepResult.fields;
