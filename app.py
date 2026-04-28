@@ -98,6 +98,11 @@ DEFAULT_PROFILE: dict[str, str] = {
     "writing_style_notes": "",
 }
 
+GRADUATE_MARKETING_DISCOVERY_QUERY = (
+    "graduate junior entry level marketing coordinator marketing assistant "
+    "brand assistant social media assistant content creator community coordinator campaign coordinator"
+)
+
 
 MARKETING_KEYWORDS = {
     "marketing": 8,
@@ -418,43 +423,43 @@ STARTER_JOB_SOURCES = [
         "name": "Sleeper sports platform",
         "source_type": "ashby",
         "token": "sleeper",
-        "query": "",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
     },
     {
         "name": "Sweatpals fitness community",
         "source_type": "ashby",
         "token": "sweatpals",
-        "query": "",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
     },
     {
         "name": "Eight Sleep sleep fitness",
         "source_type": "ashby",
         "token": "eightsleep",
-        "query": "",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
     },
     {
         "name": "Avida fitness coaching",
         "source_type": "ashby",
         "token": "avida",
-        "query": "",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
     },
     {
         "name": "TeamSnap sports platform",
         "source_type": "lever",
         "token": "teamsnap",
-        "query": "",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
     },
     {
         "name": "WHOOP performance wearable",
         "source_type": "lever",
         "token": "whoop",
-        "query": "",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
     },
     {
         "name": "Sporty Group sports media",
         "source_type": "lever",
         "token": "sporty",
-        "query": "",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
     },
     {
         "name": "Red Bull sports marketing",
@@ -490,25 +495,25 @@ STARTER_JOB_SOURCES = [
         "name": "Remotive remote marketing",
         "source_type": "remotive",
         "token": "marketing",
-        "query": "marketing brand content community social media",
+        "query": f"{GRADUATE_MARKETING_DISCOVERY_QUERY} marketing brand content community social media",
     },
     {
         "name": "Remotive remote growth",
         "source_type": "remotive",
         "token": "marketing",
-        "query": "growth campaign performance marketing",
+        "query": f"{GRADUATE_MARKETING_DISCOVERY_QUERY} growth campaign performance marketing",
     },
     {
         "name": "Remote OK marketing",
         "source_type": "remoteok",
         "token": "marketing",
-        "query": "marketing brand content social media community copywriter",
+        "query": f"{GRADUATE_MARKETING_DISCOVERY_QUERY} marketing brand content social media community copywriter",
     },
     {
         "name": "Arbeitnow Europe remote marketing",
         "source_type": "arbeitnow",
         "token": "public",
-        "query": "marketing brand content social media community copywriter growth",
+        "query": f"{GRADUATE_MARKETING_DISCOVERY_QUERY} marketing brand content social media community copywriter growth",
     },
 ]
 
@@ -898,6 +903,8 @@ def init_db() -> None:
                 job_id integer not null references jobs(id) on delete cascade,
                 status text not null default 'draft',
                 queue_state text not null default 'review',
+                reject_reason text not null default '',
+                reject_notes text not null default '',
                 contact_email text not null default '',
                 contact_name text not null default '',
                 contact_role text not null default '',
@@ -1076,8 +1083,20 @@ def init_db() -> None:
         ensure_column(conn, "applications", "form_prep_started_at", "text not null default ''")
         ensure_column(conn, "applications", "batch_id", "text not null default ''")
         ensure_column(conn, "applications", "queue_state", "text not null default 'review'")
+        ensure_column(conn, "applications", "reject_reason", "text not null default ''")
+        ensure_column(conn, "applications", "reject_notes", "text not null default ''")
         conn.execute("update applications set queue_state='review' where queue_state=''")
+        ensure_column(conn, "jobs", "reject_reason", "text not null default ''")
         ensure_column(conn, "jobs", "too_senior", "integer not null default 0")
+        conn.execute(
+            """
+            update job_sources
+            set query=?
+            where query=''
+              and source_type in ('greenhouse', 'lever', 'ashby', 'smartrecruiters', 'recruitee', 'remotive', 'remoteok', 'arbeitnow', 'workable', 'teamtailor', 'careers', 'url')
+            """,
+            (GRADUATE_MARKETING_DISCOVERY_QUERY,),
+        )
         seed_default_cv_versions(conn)
         seed_default_answer_bank(conn)
         seed_default_story_bank(conn)
@@ -1712,6 +1731,38 @@ def score_job(job: dict[str, Any]) -> tuple[int, str, str]:
     return total, "\n".join(reasons), "\n".join(concerns)
 
 
+def graduate_query_terms(query: str = "") -> list[str]:
+    return query_terms_from_text(query or GRADUATE_MARKETING_DISCOVERY_QUERY, GRADUATE_MARKETING_DISCOVERY_QUERY)
+
+
+def should_keep_discovered_role(title: str, company: str, description: str, query: str = "") -> bool:
+    lower_title = normalize_space(title).lower()
+    lower_description = normalize_space(description).lower()
+    combined = f"{lower_title} {normalize_space(company).lower()} {lower_description}"
+    if not lower_title:
+        return False
+    if any(term in lower_title for term in HARD_NON_TARGET_TITLE_SIGNALS):
+        return False
+    if any(term in lower_title for term in ["engineer", "developer", "devops", "backend", "frontend", "designer"]):
+        return False
+    if any(term in lower_title for term in ["manager", "director", "head of", "vice president", "vp ", "principal"]) and not any(term in lower_title for term in ["assistant", "junior", "graduate", "associate", "coordinator", "specialist", "executive"]):
+        return False
+    marketing_title = any(term in lower_title for term in MARKETING_TITLE_SIGNALS)
+    entry_title = any(term in lower_title for term in ENTRY_LEVEL_SIGNALS)
+    graduate_terms = graduate_query_terms(query)
+    query_hit = any(term in combined for term in graduate_terms)
+    description_marketing = any(term in combined for term in ["marketing", "brand", "content", "social media", "campaign", "community", "growth", "communications", "paid media", "copywriter"])
+    if marketing_title and entry_title:
+        return True
+    if marketing_title and query_hit:
+        return True
+    if marketing_title and description_marketing and not any(term in lower_title for term in ["manager", "director", "head of", "vice president", "vp ", "principal"]):
+        return True
+    if query_hit and description_marketing and not any(term in lower_title for term in NON_TARGET_TITLE_SIGNALS):
+        return True
+    return False
+
+
 def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> int:
     title = normalize_space(job.get("title", "")) or "Untitled role"
     company = normalize_space(job.get("company", "")) or "Unknown company"
@@ -1758,7 +1809,7 @@ def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> int:
     return int(cur.lastrowid)
 
 
-def discover_greenhouse(conn: sqlite3.Connection, board_token: str) -> dict[str, Any]:
+def discover_greenhouse(conn: sqlite3.Connection, board_token: str, query: str = "") -> dict[str, Any]:
     url = f"https://boards-api.greenhouse.io/v1/boards/{urllib.parse.quote(board_token)}/jobs?content=true"
     status, body, _ = fetch_url(url)
     if status >= 400:
@@ -1771,16 +1822,21 @@ def discover_greenhouse(conn: sqlite3.Connection, board_token: str) -> dict[str,
         if not location:
             location = item.get("location", {}).get("name", "")
         job_url = item.get("absolute_url") or ""
+        title = str(item.get("title", "") or "")
+        company = str(payload.get("name", board_token) or board_token)
+        description = plain_text_from_html(item.get("content", ""))
+        if query and not should_keep_discovered_role(title, company, description, query):
+            continue
         ids.append(
             upsert_job(
                 conn,
                 {
-                    "title": item.get("title", ""),
-                    "company": payload.get("name", board_token),
+                    "title": title,
+                    "company": company,
                     "location": location,
                     "url": job_url,
                     "source": f"greenhouse:{board_token}",
-                    "description": plain_text_from_html(item.get("content", "")),
+                    "description": description,
                     "raw_json": item,
                 },
             )
@@ -1788,7 +1844,7 @@ def discover_greenhouse(conn: sqlite3.Connection, board_token: str) -> dict[str,
     return {"count": len(ids), "ids": ids}
 
 
-def discover_lever(conn: sqlite3.Connection, site: str) -> dict[str, Any]:
+def discover_lever(conn: sqlite3.Connection, site: str, query: str = "") -> dict[str, Any]:
     url = f"https://api.lever.co/v0/postings/{urllib.parse.quote(site)}?mode=json"
     status, body, _ = fetch_url(url)
     if status >= 400:
@@ -1806,11 +1862,14 @@ def discover_lever(conn: sqlite3.Connection, site: str) -> dict[str, Any]:
                 ),
             ]
         )
+        title = str(item.get("text", "") or "")
+        if query and not should_keep_discovered_role(title, site, description, query):
+            continue
         ids.append(
             upsert_job(
                 conn,
                 {
-                    "title": item.get("text", ""),
+                    "title": title,
                     "company": site,
                     "location": categories.get("location", ""),
                     "url": item.get("hostedUrl") or item.get("applyUrl") or "",
@@ -1823,7 +1882,7 @@ def discover_lever(conn: sqlite3.Connection, site: str) -> dict[str, Any]:
     return {"count": len(ids), "ids": ids}
 
 
-def discover_ashby(conn: sqlite3.Connection, board: str) -> dict[str, Any]:
+def discover_ashby(conn: sqlite3.Connection, board: str, query: str = "") -> dict[str, Any]:
     url = f"https://api.ashbyhq.com/posting-api/job-board/{urllib.parse.quote(board)}?includeCompensation=true"
     status, body, _ = fetch_url(url)
     if status >= 400:
@@ -1834,11 +1893,14 @@ def discover_ashby(conn: sqlite3.Connection, board: str) -> dict[str, Any]:
         location = item.get("location") or ""
         description = plain_text_from_html(item.get("descriptionHtml") or item.get("descriptionPlain") or "")
         job_url = item.get("jobUrl") or item.get("applyUrl") or ""
+        title = str(item.get("title", "") or "")
+        if query and not should_keep_discovered_role(title, board, description, query):
+            continue
         ids.append(
             upsert_job(
                 conn,
                 {
-                    "title": item.get("title", ""),
+                    "title": title,
                     "company": board,
                     "location": location,
                     "url": job_url,
@@ -1897,6 +1959,9 @@ def discover_smartrecruiters(conn: sqlite3.Connection, company_identifier: str, 
             detail.get("qualifications", ""),
         ]
         description = plain_text_from_html("\n\n".join(str(part) for part in description_parts if part))
+        title = str(detail.get("name") or item.get("name") or "")
+        if query and not should_keep_discovered_role(title, company_identifier, description, query):
+            continue
         job_url = (
             detail.get("ref")
             or detail.get("applyUrl")
@@ -1909,7 +1974,7 @@ def discover_smartrecruiters(conn: sqlite3.Connection, company_identifier: str, 
             upsert_job(
                 conn,
                 {
-                    "title": detail.get("name") or item.get("name") or "",
+                    "title": title,
                     "company": company_identifier,
                     "location": location,
                     "url": job_url,
@@ -1922,7 +1987,7 @@ def discover_smartrecruiters(conn: sqlite3.Connection, company_identifier: str, 
     return {"count": len(ids), "ids": ids}
 
 
-def discover_recruitee(conn: sqlite3.Connection, subdomain: str) -> dict[str, Any]:
+def discover_recruitee(conn: sqlite3.Connection, subdomain: str, query: str = "") -> dict[str, Any]:
     url = f"https://{urllib.parse.quote(subdomain)}.recruitee.com/api/offers/"
     status, body, _ = fetch_url(url)
     if status >= 400:
@@ -1940,6 +2005,9 @@ def discover_recruitee(conn: sqlite3.Connection, subdomain: str) -> dict[str, An
             for key in ["description", "requirements", "careers_description", "careers_requirements"]
             if item.get(key)
         )
+        title = str(item.get("title", "") or "")
+        if query and not should_keep_discovered_role(title, subdomain, plain_text_from_html(description or ""), query):
+            continue
         location_data = item.get("location") or {}
         if isinstance(location_data, dict):
             location = ", ".join(str(location_data.get(key, "")) for key in ["city", "country"] if location_data.get(key))
@@ -1952,7 +2020,7 @@ def discover_recruitee(conn: sqlite3.Connection, subdomain: str) -> dict[str, An
             upsert_job(
                 conn,
                 {
-                    "title": item.get("title", ""),
+                    "title": title,
                     "company": subdomain,
                     "location": location,
                     "url": job_url,
@@ -1997,6 +2065,8 @@ def discover_remotive(conn: sqlite3.Connection, category: str = "marketing", que
         if not job_url and item.get("id"):
             job_url = f"https://remotive.com/remote-jobs/{item.get('id')}"
         tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+        if not should_keep_discovered_role(title, company, description + " " + " ".join(str(tag) for tag in tags), query):
+            continue
         ids.append(
             upsert_job(
                 conn,
@@ -2050,7 +2120,7 @@ def discover_remoteok(conn: sqlite3.Connection, token: str = "", query: str = ""
         combined = " ".join([title, company, description, " ".join(str(tag) for tag in tags)]).lower()
         if query_terms and not any(term in combined for term in query_terms):
             continue
-        if any(term in title.lower() for term in HARD_NON_TARGET_TITLE_SIGNALS + ["engineer", "developer", "backend", "frontend", "devops"]):
+        if not should_keep_discovered_role(title, company, description + " " + " ".join(str(tag) for tag in tags), query or token):
             continue
         job_url = str(item.get("url") or "")
         if job_url and job_url.startswith("/"):
@@ -2104,7 +2174,7 @@ def discover_arbeitnow(conn: sqlite3.Connection, token: str = "", query: str = "
         combined = " ".join([title, company, description, " ".join(str(tag) for tag in tags)]).lower()
         if query_terms and not any(term in combined for term in query_terms):
             continue
-        if any(term in title.lower() for term in HARD_NON_TARGET_TITLE_SIGNALS + ["engineer", "developer", "backend", "frontend", "devops"]):
+        if not should_keep_discovered_role(title, company, description + " " + " ".join(str(tag) for tag in tags), query or token):
             continue
         location = normalize_space(str(item.get("location") or ""))
         if item.get("remote"):
@@ -2275,6 +2345,8 @@ def save_job_source(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
     source_type = normalize_space(str(data.get("source_type", ""))).lower()
     token = normalize_space(str(data.get("token", "")))
     query = normalize_space(str(data.get("query", "")))
+    if not query and source_type in {"greenhouse", "lever", "ashby", "smartrecruiters", "recruitee", "remotive", "remoteok", "arbeitnow", "workable", "teamtailor", "careers", "url"}:
+        query = GRADUATE_MARKETING_DISCOVERY_QUERY
     enabled = 1 if data.get("enabled", True) else 0
     if not source_type or not token:
         raise RuntimeError("Source type and token/URL are required.")
@@ -2317,16 +2389,18 @@ def run_job_source(conn: sqlite3.Connection, source: dict[str, Any]) -> dict[str
     source_type = str(source.get("source_type", "")).lower()
     token = str(source.get("token", ""))
     query = str(source.get("query", ""))
+    if not query and source_type in {"greenhouse", "lever", "ashby", "smartrecruiters", "recruitee", "remotive", "remoteok", "arbeitnow", "workable", "teamtailor", "careers", "url"}:
+        query = GRADUATE_MARKETING_DISCOVERY_QUERY
     if source_type == "greenhouse":
-        result = discover_greenhouse(conn, token)
+        result = discover_greenhouse(conn, token, query)
     elif source_type == "lever":
-        result = discover_lever(conn, token)
+        result = discover_lever(conn, token, query)
     elif source_type == "ashby":
-        result = discover_ashby(conn, token)
+        result = discover_ashby(conn, token, query)
     elif source_type == "smartrecruiters":
         result = discover_smartrecruiters(conn, token, query)
     elif source_type == "recruitee":
-        result = discover_recruitee(conn, token)
+        result = discover_recruitee(conn, token, query)
     elif source_type == "remotive":
         result = discover_remotive(conn, token or "marketing", query)
     elif source_type == "remoteok":
@@ -2665,11 +2739,11 @@ def set_application_queue_state(application_id: int, queue_state: str) -> dict[s
     return {"id": application_id, "queue_state": normalized}
 
 
-def reject_application_and_replace(application_id: int) -> dict[str, Any]:
+def reject_application_and_replace(application_id: int, reason: str = "", notes: str = "") -> dict[str, Any]:
     with connect() as conn:
         row = conn.execute(
             """
-            select applications.*, jobs.id as job_id_value, jobs.company, jobs.title
+            select applications.*, jobs.id as job_id_value, jobs.company, jobs.title, jobs.too_senior as job_too_senior
             from applications
             join jobs on jobs.id = applications.job_id
             where applications.id=?
@@ -2681,13 +2755,16 @@ def reject_application_and_replace(application_id: int) -> dict[str, Any]:
         app = row_to_dict(row) or {}
         batch_id = str(app.get("batch_id", "") or now_iso())
         timestamp = now_iso()
+        normalized_reason = normalize_space(reason).lower()
+        normalized_notes = normalize_space(notes)
+        too_senior = 1 if "senior" in normalized_reason or "manager" in normalized_reason else int(app.get("job_too_senior") or 0)
         conn.execute(
-            "update applications set status='rejected', updated_at=? where id=?",
-            (timestamp, application_id),
+            "update applications set status='rejected', reject_reason=?, reject_notes=?, updated_at=? where id=?",
+            (normalized_reason, normalized_notes, timestamp, application_id),
         )
         conn.execute(
-            "update jobs set status='rejected', updated_at=? where id=?",
-            (timestamp, int(app.get("job_id_value") or app.get("job_id") or 0)),
+            "update jobs set status='rejected', reject_reason=?, too_senior=?, updated_at=? where id=?",
+            (normalized_reason, too_senior, timestamp, int(app.get("job_id_value") or app.get("job_id") or 0)),
         )
         replacement_ids = next_fresh_job_ids(conn, 1)
         replacement_app_ids: list[int] = []
@@ -2702,6 +2779,7 @@ def reject_application_and_replace(application_id: int) -> dict[str, Any]:
         assessed = assess_application_queue(conn)
     return {
         "rejected_id": application_id,
+        "reason": normalized_reason,
         "replacement_job_ids": replacement_ids,
         "replacement_application_ids": replacement_app_ids,
         "assessed": assessed,
@@ -4883,6 +4961,92 @@ def active_domain_rate_limits(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return list(limited.values())
 
 
+def ats_prep_stats(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    stats: dict[str, dict[str, Any]] = {}
+    rows = conn.execute(
+        """
+        select applications.id as application_id,
+               applications.status as application_status,
+               applications.form_prep_started_at,
+               applications.form_prep_report_path,
+               jobs.url, jobs.source
+        from applications
+        join jobs on jobs.id = applications.job_id
+        order by applications.updated_at desc
+        """
+    ).fetchall()
+    for row in rows:
+        item = row_to_dict(row) or {}
+        platform = detect_application_platform(str(item.get("url", "")), str(item.get("source", ""))) or "custom"
+        bucket = stats.setdefault(
+            platform,
+            {
+                "platform": platform,
+                "applications": 0,
+                "started": 0,
+                "reports": 0,
+                "completed": 0,
+                "waiting": 0,
+                "restrictions": 0,
+                "manual_prompts": 0,
+                "errors": 0,
+                "fields_seen": 0,
+                "fields_filled": 0,
+                "submitted": 0,
+            },
+        )
+        bucket["applications"] += 1
+        if str(item.get("application_status", "")) in {"submitted", "interview", "offer"}:
+            bucket["submitted"] += 1
+        if str(item.get("form_prep_started_at", "")):
+            bucket["started"] += 1
+        report = read_json_file(str(item.get("form_prep_report_path", "")))
+        if not isinstance(report, dict):
+            continue
+        bucket["reports"] += 1
+        status = str(report.get("status", ""))
+        if status == "completed":
+            bucket["completed"] += 1
+        elif status == "waiting-user-action":
+            bucket["waiting"] += 1
+        blocker = report.get("blocker") or {}
+        blocker_kind = str(blocker.get("kind", ""))
+        if blocker_kind == "platform-restriction":
+            bucket["restrictions"] += 1
+        elif blocker_kind:
+            bucket["manual_prompts"] += 1
+        bucket["errors"] += len(report.get("errors") or [])
+        bucket["fields_seen"] += int(report.get("field_count") or 0)
+        bucket["fields_filled"] += len(report.get("filled_fields") or [])
+    for bucket in stats.values():
+        reports = max(1, int(bucket["reports"]))
+        fields_seen = max(1, int(bucket["fields_seen"]))
+        bucket["completion_rate"] = round((int(bucket["completed"]) / reports) * 100)
+        bucket["fill_rate"] = round((int(bucket["fields_filled"]) / fields_seen) * 100)
+    return sorted(
+        stats.values(),
+        key=lambda item: (
+            -int(item.get("completion_rate", 0)),
+            -int(item.get("fill_rate", 0)),
+            -int(item.get("reports", 0)),
+            str(item.get("platform", "")),
+        ),
+    )
+
+
+def rejection_reason_stats(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        select reject_reason, count(*) as count
+        from applications
+        where reject_reason != ''
+        group by reject_reason
+        order by count desc, reject_reason asc
+        """
+    ).fetchall()
+    return [{"reason": str(row["reject_reason"]), "count": int(row["count"])} for row in rows]
+
+
 def active_domain_blocker_for_url(conn: sqlite3.Connection, url: str) -> dict[str, Any] | None:
     variants = domain_variants_for_url(url)
     if not variants:
@@ -6388,20 +6552,20 @@ class AppHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/discover":
                 source = str(data.get("source", "")).lower()
                 token = str(data.get("token", "")).strip()
-                query = str(data.get("query", "")).strip()
+                query = str(data.get("query", "")).strip() or GRADUATE_MARKETING_DISCOVERY_QUERY
                 if not token:
                     raise RuntimeError("Missing board token/site name")
                 with connect() as conn:
                     if source == "greenhouse":
-                        result = discover_greenhouse(conn, token)
+                        result = discover_greenhouse(conn, token, query)
                     elif source == "lever":
-                        result = discover_lever(conn, token)
+                        result = discover_lever(conn, token, query)
                     elif source == "ashby":
-                        result = discover_ashby(conn, token)
+                        result = discover_ashby(conn, token, query)
                     elif source == "smartrecruiters":
                         result = discover_smartrecruiters(conn, token, query)
                     elif source == "recruitee":
-                        result = discover_recruitee(conn, token)
+                        result = discover_recruitee(conn, token, query)
                     elif source == "remotive":
                         result = discover_remotive(conn, token or "marketing", query)
                     elif source == "remoteok":
@@ -6517,7 +6681,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.json({"ok": True, **result})
             elif parsed.path == "/api/applications/reject-and-replace":
                 app_id = int(data.get("id") or 0)
-                result = reject_application_and_replace(app_id)
+                result = reject_application_and_replace(
+                    app_id,
+                    str(data.get("reason") or ""),
+                    str(data.get("notes") or ""),
+                )
                 self.json({"ok": True, **result})
             elif parsed.path == "/api/applications/queue-state":
                 app_id = int(data.get("id") or 0)
@@ -7040,6 +7208,8 @@ def get_state() -> dict[str, Any]:
             app["document_artifacts"] = build_application_artifacts(job_stub, app, profile)
         blocked_domains = active_domain_blockers(conn)
         throttled_domains = active_domain_rate_limits(conn)
+        ats_stats = ats_prep_stats(conn)
+        rejection_stats = rejection_reason_stats(conn)
         leads = [
             row_to_dict(row)
             for row in conn.execute("select * from company_leads order by updated_at desc, created_at desc").fetchall()
@@ -7127,6 +7297,8 @@ def get_state() -> dict[str, Any]:
         "site_credentials": site_credentials,
         "blocked_domains": blocked_domains,
         "throttled_domains": throttled_domains,
+        "ats_prep_stats": ats_stats,
+        "rejection_reason_stats": rejection_stats,
         "session_memory": read_session_memory(),
     }
 
@@ -7534,10 +7706,14 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
         <div>
-          <div class="panel">
-            <h2>Quality Hotspots</h2>
-            <div id="scannerHotspots"></div>
-          </div>
+            <div class="panel">
+              <h2>Quality Hotspots</h2>
+              <div id="scannerHotspots"></div>
+            </div>
+            <div class="panel">
+              <h2>ATS Platform Stats</h2>
+              <div id="scannerPlatforms"></div>
+            </div>
         </div>
       </div>
     </section>
@@ -7638,9 +7814,10 @@ INDEX_HTML = r"""<!doctype html>
               </div>
               <div><label>Board token / site name</label><input id="discover_token" placeholder="company-name"></div>
             </div>
-            <label>Optional search query</label><input id="discover_query" placeholder="marketing OR social media">
+            <label>Optional search query</label><input id="discover_query" value="graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator">
             <div class="actions">
               <button class="btn primary" onclick="discover()">Import jobs</button>
+              <button class="btn" onclick="useGraduateDiscoveryQuery()">Use graduate marketing query</button>
             </div>
           </div>
           <div class="panel">
@@ -7667,7 +7844,7 @@ INDEX_HTML = r"""<!doctype html>
               </div>
             </div>
             <label>Token / company identifier / URL</label><input id="source_token" placeholder="company-name, Workable subdomain, Teamtailor URL, or https://...">
-            <label>Optional query</label><input id="source_query" placeholder="marketing, brand, social media">
+            <label>Optional query</label><input id="source_query" value="graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator">
             <label><input id="source_enabled" type="checkbox" style="width:auto" checked> Enabled for daily discovery</label>
             <div class="actions">
               <button class="btn primary" onclick="saveSource()">Save source</button>
@@ -7768,7 +7945,7 @@ INDEX_HTML = r"""<!doctype html>
               </div>
               <div><label>ATS token / source token</label><input id="target_source_token" placeholder="company-name or board token"></div>
             </div>
-            <label>Source query</label><input id="target_source_query" value="marketing">
+            <label>Source query</label><input id="target_source_query" value="graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator">
             <label>Notes / why they fit</label><textarea id="target_notes" placeholder="Specific products, campaigns, community, brand angle, or contact ideas."></textarea>
             <div class="actions">
               <button class="btn primary" onclick="saveTarget()">Save target</button>
@@ -8066,6 +8243,18 @@ Record:
     let selectedLead = null;
     let selectedTarget = null;
     let selectedCvVersion = null;
+    const graduateDiscoveryQuery = "graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator";
+    const rejectionReasonChoices = [
+      "too senior",
+      "not really marketing",
+      "wrong location",
+      "weak brand fit",
+      "salary too low",
+      "remote eligibility unclear",
+      "duplicate / already seen",
+      "poor application quality",
+      "other"
+    ];
 
     const profileKeys = [
       "full_name", "email", "phone", "location", "street_address", "suburb", "city", "region", "postcode", "country",
@@ -8155,6 +8344,16 @@ Record:
       `;
       renderDailyReview();
       showReminderPopup(reminders);
+    }
+
+    function useGraduateDiscoveryQuery() {
+      const discover = document.getElementById("discover_query");
+      const source = document.getElementById("source_query");
+      const target = document.getElementById("target_source_query");
+      if (discover) discover.value = graduateDiscoveryQuery;
+      if (source) source.value = graduateDiscoveryQuery;
+      if (target) target.value = graduateDiscoveryQuery;
+      message("Graduate marketing discovery query loaded.");
     }
 
     function currentBatchApplications() {
@@ -8396,7 +8595,8 @@ Record:
       const overview = document.getElementById("scannerOverview");
       const appsTarget = document.getElementById("scannerApplications");
       const hotspots = document.getElementById("scannerHotspots");
-      if (!overview || !appsTarget || !hotspots) return;
+      const platformsTarget = document.getElementById("scannerPlatforms");
+      if (!overview || !appsTarget || !hotspots || !platformsTarget) return;
       const apps = currentBatchApplications();
       const lowQuality = apps.filter(app => Number(app.quality_score || 0) < 70);
       const flagged = apps.filter(app => (app.truthfulness_flags || "").trim());
@@ -8451,8 +8651,26 @@ Record:
           <p class="muted">${flagged.length ? `${flagged.length} draft(s) have truth/work-authorization flags to review manually.` : "No major truthfulness flags in the current batch."}</p>
           <p class="muted">${missingResearch.length ? `${missingResearch.length} draft(s) still need company research.` : "Research coverage looks acceptable for the current batch."}</p>
           <p class="muted">${apps.filter(app => safeForAutoApproval(app)).length} draft(s) look safe enough to move straight into Approved.</p>
+          <p class="muted">Top reject reasons: ${escapeHtml((state.rejection_reason_stats || []).slice(0, 4).map(item => `${item.reason} (${item.count})`).join(", ") || "none yet")}</p>
         </div>
       `;
+      platformsTarget.innerHTML = (state.ats_prep_stats || []).map(item => `
+        <div class="reminder">
+          <h3>${escapeHtml(item.platform || "custom")}</h3>
+          <div class="meta">
+            reports ${escapeHtml(item.reports || 0)} -
+            completion ${escapeHtml(item.completion_rate || 0)}% -
+            fill ${escapeHtml(item.fill_rate || 0)}%
+          </div>
+          <p class="muted">
+            started ${escapeHtml(item.started || 0)},
+            waiting ${escapeHtml(item.waiting || 0)},
+            restrictions ${escapeHtml(item.restrictions || 0)},
+            prompts ${escapeHtml(item.manual_prompts || 0)},
+            submitted ${escapeHtml(item.submitted || 0)}
+          </p>
+        </div>
+      `).join("") || `<p class="muted">No ATS prep stats yet.</p>`;
     }
 
     function renderInterviewPrep() {
@@ -9426,7 +9644,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       document.getElementById("target_id").value = selectedTarget.id || "";
       for (const field of fields) {
         const el = document.getElementById(`target_${field}`);
-        if (el) el.value = selectedTarget[field] || (field === "source_query" ? "marketing" : "");
+        if (el) el.value = selectedTarget[field] || (field === "source_query" ? "graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator" : "");
       }
       showTab("targets");
     }
@@ -9440,7 +9658,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       document.getElementById("target_priority").value = "3";
       document.getElementById("target_status").value = "target";
       document.getElementById("target_source_type").value = "";
-      document.getElementById("target_source_query").value = "marketing";
+      document.getElementById("target_source_query").value = "graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator";
     }
 
     function selectCvVersion(id) {
@@ -9716,7 +9934,9 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         enabled: document.getElementById("source_enabled").checked
       };
       await api("/api/sources/save", {method: "POST", body: JSON.stringify(payload)});
-      ["name", "token", "query"].forEach(key => document.getElementById(`source_${key}`).value = "");
+      document.getElementById("source_name").value = "";
+      document.getElementById("source_token").value = "";
+      document.getElementById("source_query").value = graduateDiscoveryQuery;
       message("Automatic source saved.");
       await load();
     }
@@ -10153,13 +10373,17 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
     async function rejectApplication(id) {
       const app = (state.applications || []).find(item => Number(item.id) === Number(id));
       if (!app) return;
+      const reasonPrompt = `Why are you rejecting ${app.title || "this role"} at ${app.company || "this company"}?\n\nUse one of these or type your own:\n- ${rejectionReasonChoices.join("\n- ")}`;
+      const reason = prompt(reasonPrompt, "too senior");
+      if (!reason) return;
+      const notes = prompt("Optional note for future learning:", "") || "";
       const confirmed = confirm(`Remove ${app.title || "this role"} at ${app.company || "this company"} and try to pull in a replacement?`);
       if (!confirmed) return;
-      const result = await api("/api/applications/reject-and-replace", {method: "POST", body: JSON.stringify({id})});
+      const result = await api("/api/applications/reject-and-replace", {method: "POST", body: JSON.stringify({id, reason, notes})});
       const replacements = result.replacement_application_ids?.length || 0;
       message(replacements
-        ? `Role removed. ${replacements} replacement draft${replacements === 1 ? "" : "s"} added to the current batch.`
-        : "Role removed. No safe replacement was available right now.");
+        ? `Role removed as ${reason}. ${replacements} replacement draft${replacements === 1 ? "" : "s"} added to the current batch.`
+        : `Role removed as ${reason}. No safe replacement was available right now.`);
       selectedApplication = null;
       await load();
       showTab("applications");
