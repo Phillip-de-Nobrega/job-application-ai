@@ -4727,9 +4727,11 @@ def compose_cold_outreach(profile: dict[str, str], company: str, contact_name: s
         f"""
         {greeting}
 
-        I am reaching out because I have been following {company} and was drawn to {reason}. I am a UCT Business Science Marketing graduate with experience across content creation, market research, brand strategy, Google Analytics, Meta Ads Manager, Canva, and AI-assisted product development.
+        I wanted to reach out because I have been following {company} and was genuinely drawn to {reason}. I am a UCT Business Science Marketing graduate with hands-on experience across content creation, market research, brand thinking, Google Analytics, Meta Ads Manager, Canva, and AI-assisted product work.
 
-        I am especially interested in outdoor, sport, fitness, wellness, and consumer brands where practical marketing work can support real community and customer engagement. If there is a useful way for me to contribute, I would appreciate the chance to introduce myself properly.
+        I am especially interested in outdoor, sport, fitness, wellness, and consumer brands where marketing work can actually strengthen community, customer engagement, and brand feel. I think I would be a strong junior-level fit for practical support across content, campaign execution, social, research, reporting, and day-to-day brand work.
+
+        If there is room for someone early-career but hardworking, sharp, and genuinely excited about the brand, I would really value the chance to introduce myself properly. I would also be open to a junior role, a short trial period, or project-based support if that is more useful.
 
         Kind regards,
         {sender_name}
@@ -4746,8 +4748,8 @@ def compose_lead_outreach(profile: dict[str, str], lead: dict[str, Any]) -> str:
     body = compose_cold_outreach(profile, company, contact_name, company_notes)
     if contact_role:
         body = body.replace(
-            "I am reaching out because",
-            f"I noticed your work as {contact_role}. I am reaching out because",
+            "I wanted to reach out because",
+            f"I noticed your work as {contact_role}. I wanted to reach out because",
             1,
         )
     if industry:
@@ -4761,7 +4763,7 @@ def compose_lead_outreach(profile: dict[str, str], lead: dict[str, Any]) -> str:
 
 def lead_subject(lead: dict[str, Any]) -> str:
     company = normalize_space(str(lead.get("company", ""))) or "your company"
-    return f"Marketing graduate interested in {company}"
+    return f"Quick introduction - marketing support for {company}"
 
 
 def save_company_lead(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
@@ -7437,14 +7439,19 @@ INDEX_HTML = r"""<!doctype html>
       max-width: 1320px;
       margin: 0 auto;
       padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: grid;
       gap: 16px;
+    }
+    .nav-stack {
+      display: grid;
+      gap: 8px;
+      justify-items: start;
     }
     h1 { margin: 0; font-size: 22px; }
     .sub { color: var(--muted); font-size: 13px; }
     nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav-secondary { display: none; }
+    .nav-secondary.open { display: flex; }
     nav button, .btn {
       border: 1px solid var(--line);
       background: #fff;
@@ -7459,6 +7466,11 @@ INDEX_HTML = r"""<!doctype html>
       background: var(--accent);
       border-color: var(--accent);
       color: white;
+    }
+    nav button.ghost-active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #fff;
     }
     .btn.warn { background: var(--accent-2); border-color: var(--accent-2); color: white; }
     main {
@@ -7617,6 +7629,21 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       gap: 10px;
     }
+    .workflow-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .workflow-step {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .workflow-step strong {
+      display: block;
+      margin-bottom: 4px;
+    }
     @media (max-width: 920px) {
       .grid, .row, .metric-grid, .tool-grid { grid-template-columns: 1fr; }
       .job { grid-template-columns: 1fr; }
@@ -7631,23 +7658,28 @@ INDEX_HTML = r"""<!doctype html>
         <h1>Job Application AI</h1>
         <div class="sub">Local, supervised graduate-marketing job workspace</div>
       </div>
-      <nav>
-        <button data-tab="dashboard" class="active">Home</button>
-        <button data-tab="auto_apply_queue">Auto Apply Queue</button>
-        <button data-tab="resume_lab">Resume Lab</button>
-        <button data-tab="ats_scanner">ATS Scanner</button>
-        <button data-tab="interview_prep">Interview Prep</button>
-        <button data-tab="profile">Profile</button>
-        <button data-tab="discover">Discover</button>
-        <button data-tab="targets">Targets</button>
-        <button data-tab="jobs">Jobs</button>
-        <button data-tab="applications">Applications</button>
-        <button data-tab="outreach">Outreach</button>
-        <button data-tab="auto">Ops</button>
-        <button data-tab="analytics">Analytics</button>
-        <button data-tab="email">Email</button>
-        <button data-tab="session">Session</button>
-      </nav>
+      <div class="nav-stack">
+        <nav class="nav-primary">
+          <button data-tab="dashboard" class="active">Today</button>
+          <button data-tab="auto_apply_queue">Queue</button>
+          <button data-tab="applications">Applications</button>
+          <button data-tab="outreach">Outreach</button>
+          <button data-tab="resume_lab">Documents</button>
+          <button data-tab="profile">Settings</button>
+          <button data-tab="email">Email</button>
+          <button id="advancedToggle" type="button">Advanced</button>
+        </nav>
+        <nav id="advancedNav" class="nav-secondary">
+          <button data-tab="discover">Discover</button>
+          <button data-tab="targets">Targets</button>
+          <button data-tab="jobs">Jobs</button>
+          <button data-tab="ats_scanner">ATS Scanner</button>
+          <button data-tab="interview_prep">Interview Prep</button>
+          <button data-tab="auto">Ops</button>
+          <button data-tab="analytics">Analytics</button>
+          <button data-tab="session">Session</button>
+        </nav>
+      </div>
     </div>
   </header>
 
@@ -7658,39 +7690,12 @@ INDEX_HTML = r"""<!doctype html>
       <div class="notice">
         This assistant prepares and tracks applications. It stops before final submission and does not bypass CAPTCHA, login, rate limits, or platform restrictions.
       </div>
-      <div class="tool-grid">
-        <div class="tool-card">
-          <h3>Auto Apply Queue</h3>
-          <p class="muted">Review the active batch, reject weak roles, and prepare strong applications one by one.</p>
-          <div class="actions"><button class="btn primary" onclick="showTab('auto_apply_queue')">Open queue</button></div>
-        </div>
-        <div class="tool-card">
-          <h3>Resume Lab</h3>
-          <p class="muted">Manage CV versions, tailored briefs, and reusable application documents.</p>
-          <div class="actions"><button class="btn primary" onclick="showTab('resume_lab')">Open resume lab</button></div>
-        </div>
-        <div class="tool-card">
-          <h3>ATS Scanner</h3>
-          <p class="muted">Review application quality, checklist gaps, truthfulness flags, and ATS readiness.</p>
-          <div class="actions"><button class="btn primary" onclick="showTab('ats_scanner')">Open scanner</button></div>
-        </div>
-        <div class="tool-card">
-          <h3>Interview Prep</h3>
-          <p class="muted">Keep answer stories, recruiter reply signals, and interview-stage applications in one place.</p>
-          <div class="actions"><button class="btn primary" onclick="showTab('interview_prep')">Open prep</button></div>
-        </div>
-      </div>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Workspace Overview</h2>
+            <h2>Today</h2>
             <div id="summary"></div>
-            <div class="actions">
-              <button class="btn primary" onclick="runDailyWorkflow()">Run daily workflow</button>
-              <button class="btn primary" onclick="showTab('discover')">Find roles</button>
-              <button class="btn" onclick="showTab('auto_apply_queue')">Review queue</button>
-              <button class="btn" onclick="showTab('resume_lab')">Resume lab</button>
-            </div>
+            <div id="workflowGuide"></div>
           </div>
           <div class="panel">
             <h2>Daily Review</h2>
@@ -7698,12 +7703,12 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
         <div class="panel">
-          <h2>Guided Searches</h2>
+          <h2>Useful Shortcuts</h2>
           <div id="searchLinks"></div>
-        </div>
-        <div class="panel">
-          <h2>Source Health</h2>
-          <div id="dashboardSourceHealth"></div>
+          <div style="margin-top:18px">
+            <h2>Source Health</h2>
+            <div id="dashboardSourceHealth"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -8078,11 +8083,12 @@ INDEX_HTML = r"""<!doctype html>
         <div>
           <div class="panel">
             <h2>Application Drafts</h2>
-            <p class="muted">Use `Prepare form` on any draft card below to open the live application page in a visible browser. You can also open a draft first and use the same action in the editor.</p>
+            <p class="muted">Open one draft, prepare the form, then submit it yourself.</p>
             <div id="applicationDomainBlocks"></div>
             <div class="actions">
               <button class="btn primary" onclick="refreshApplicationQueue()">Refresh with new options</button>
-              <button class="btn" onclick="runFormFillSmokeTest()">Run form-fill smoke test</button>
+              <button class="btn" onclick="showTab('auto_apply_queue')">Open queue board</button>
+              <button class="btn" onclick="runFormFillSmokeTest()">Smoke test</button>
             </div>
             <div class="actions">
               <label for="application_view_mode" style="margin:0">View</label>
@@ -8095,22 +8101,24 @@ INDEX_HTML = r"""<!doctype html>
             <div id="applicationList"></div>
           </div>
           <div class="panel">
-            <h2>Site Login Credentials</h2>
-            <p class="muted">Saved locally. Metadata stays in this app database, and passwords stay in macOS Keychain. Use the site domain that the login page or ATS actually uses.</p>
-            <input id="credential_id" type="hidden">
-            <div class="row">
-              <div><label>Domain</label><input id="credential_domain" placeholder="linkedin.com"></div>
-              <div><label>Login URL</label><input id="credential_login_url" placeholder="https://www.linkedin.com/login"></div>
-              <div><label>Username / email</label><input id="credential_username" placeholder="your@email.com"></div>
-              <div><label>Password</label><input id="credential_password" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing password"></div>
-            </div>
-            <label>Notes</label><textarea id="credential_notes" placeholder="Optional notes about MFA, which flow this is for, or when to use it."></textarea>
-            <label><input id="credential_enabled" type="checkbox" style="width:auto" checked> Enabled for automatic login attempts</label>
-            <div class="actions">
-              <button class="btn primary" onclick="saveSiteCredential()">Save credential</button>
-              <button class="btn" onclick="clearSiteCredentialForm()">New credential</button>
-            </div>
-            <div id="siteCredentialList"></div>
+            <details>
+              <summary><strong>Saved site credentials</strong></summary>
+              <p class="muted">Saved locally. Metadata stays in this app database, and passwords stay in macOS Keychain. Use the site domain that the login page or ATS actually uses.</p>
+              <input id="credential_id" type="hidden">
+              <div class="row">
+                <div><label>Domain</label><input id="credential_domain" placeholder="linkedin.com"></div>
+                <div><label>Login URL</label><input id="credential_login_url" placeholder="https://www.linkedin.com/login"></div>
+                <div><label>Username / email</label><input id="credential_username" placeholder="your@email.com"></div>
+                <div><label>Password</label><input id="credential_password" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing password"></div>
+              </div>
+              <label>Notes</label><textarea id="credential_notes" placeholder="Optional notes about MFA, which flow this is for, or when to use it."></textarea>
+              <label><input id="credential_enabled" type="checkbox" style="width:auto" checked> Enabled for automatic login attempts</label>
+              <div class="actions">
+                <button class="btn primary" onclick="saveSiteCredential()">Save credential</button>
+                <button class="btn" onclick="clearSiteCredentialForm()">New credential</button>
+              </div>
+              <div id="siteCredentialList"></div>
+            </details>
           </div>
         </div>
         <div class="panel">
@@ -8124,9 +8132,9 @@ INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Company Outreach</h2>
+            <h2>Direct Outreach</h2>
             <div class="notice">
-              Cold outreach is review-first. Do not use this for bulk email. Save only relevant companies and do not contact anyone who opts out.
+              Use this for thoughtful one-to-one emails to founders, owners, or hiring people at brands you genuinely want to work with. The app drafts the email, but you still review it before anything is sent.
             </div>
             <div class="row">
               <div><label>Company</label><input id="lead_company"></div>
@@ -8136,19 +8144,20 @@ INDEX_HTML = r"""<!doctype html>
               <div><label>Contact name</label><input id="lead_contact_name"></div>
               <div><label>Contact role</label><input id="lead_contact_role"></div>
             </div>
-            <label>Contact email</label><input id="lead_contact_email" placeholder="owner@company.com">
-            <label>Why this company / personalization notes</label><textarea id="lead_company_notes" placeholder="Specific product, campaign, brand angle, community, or reason you fit."></textarea>
+            <label>Contact email</label><input id="lead_contact_email" placeholder="founder@company.com or owner@company.com">
+            <label>Why this brand fits / why you fit</label><textarea id="lead_company_notes" placeholder="What you genuinely like about the brand, what stands out, how your background lines up, and what kind of support you could offer."></textarea>
             <div class="actions">
               <button class="btn primary" onclick="saveLead()">Save lead</button>
+              <button class="btn" onclick="showTab('targets')">Use a target company instead</button>
             </div>
           </div>
           <div class="panel">
-            <h2>Lead Queue</h2>
+            <h2>Saved Outreach Leads</h2>
             <div id="leadList"></div>
           </div>
         </div>
         <div class="panel">
-          <h2>Edit Outreach</h2>
+          <h2>Write And Send</h2>
           <div id="leadEditor" class="muted">Select a company lead.</div>
         </div>
       </div>
@@ -8327,6 +8336,8 @@ Record:
     let selectedLead = null;
     let selectedTarget = null;
     let selectedCvVersion = null;
+    const primaryTabs = new Set(["dashboard", "auto_apply_queue", "applications", "outreach", "resume_lab", "profile", "email"]);
+    const advancedTabs = new Set(["discover", "targets", "jobs", "ats_scanner", "interview_prep", "auto", "analytics", "session"]);
     const graduateDiscoveryQuery = "graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator";
     const rejectionReasonChoices = [
       "too senior",
@@ -8351,13 +8362,28 @@ Record:
     ];
     let reminderPopupShown = false;
 
-    document.querySelectorAll("nav button").forEach(button => {
+    document.querySelectorAll("nav button[data-tab]").forEach(button => {
       button.addEventListener("click", () => showTab(button.dataset.tab));
     });
+    document.getElementById("advancedToggle")?.addEventListener("click", () => {
+      const nav = document.getElementById("advancedNav");
+      const next = !nav?.classList.contains("open");
+      setAdvancedNav(next);
+    });
+
+    function setAdvancedNav(open) {
+      const nav = document.getElementById("advancedNav");
+      const toggle = document.getElementById("advancedToggle");
+      if (nav) nav.classList.toggle("open", Boolean(open));
+      if (toggle) toggle.classList.toggle("ghost-active", Boolean(open));
+    }
 
     function showTab(tab) {
-      document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+      setAdvancedNav(advancedTabs.has(tab));
+      document.querySelectorAll("nav button[data-tab]").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
       document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.id === tab));
+      const toggle = document.getElementById("advancedToggle");
+      if (toggle) toggle.classList.toggle("active", advancedTabs.has(tab) && !primaryTabs.has(tab));
     }
 
     async function api(path, options = {}) {
@@ -8414,18 +8440,63 @@ Record:
       const targetCount = (state.targets || []).length;
       const sourceCount = (state.sources || []).filter(source => source.enabled).length;
       const reminders = followUpReminders();
+      const batchApps = currentBatchApplications();
+      const approved = batchApps.filter(app => normalizeQueueState(app.queue_state) === "approved").length;
+      const review = batchApps.filter(app => normalizeQueueState(app.queue_state) === "review").length;
+      const missingResearch = batchApps.filter(app => !(app.research_notes || "").trim()).length;
+      const workflowGuide = document.getElementById("workflowGuide");
       document.getElementById("summary").innerHTML = `
-        <p><strong>${jobs.length}</strong> jobs tracked.</p>
-        <p><strong>${ready}</strong> strong jobs ready for review.</p>
-        <p><strong>${drafted}</strong> application drafts waiting.</p>
-        <p><strong>${applied}</strong> applications marked as submitted.</p>
-        <p><strong>${targetCount}</strong> target companies tracked.</p>
-        <p><strong>${leadCount}</strong> company outreach leads tracked.</p>
-        <p><strong>${sourceCount}</strong> automatic job sources enabled.</p>
+        <div class="metric-grid">
+          ${metric("Jobs tracked", jobs.length, "all sources")}
+          ${metric("Queue review", review, "need a decision")}
+          ${metric("Approved", approved, "ready for prep")}
+          ${metric("Submitted", applied, "already sent")}
+        </div>
+        <p><strong>${ready}</strong> strong jobs are still in the pool.</p>
+        <p><strong>${drafted}</strong> draft applications exist.</p>
+        <p><strong>${targetCount}</strong> target companies tracked. <strong>${sourceCount}</strong> automatic sources enabled. <strong>${leadCount}</strong> outreach leads tracked.</p>
         <p class="muted">Daily target: ${escapeHtml(state.profile.daily_target || "5 high-quality applications per day.")}</p>
         <h3>Follow-up Reminders</h3>
         ${renderReminderList(reminders)}
       `;
+      if (workflowGuide) {
+        workflowGuide.innerHTML = `
+          <div class="workflow-list">
+            <div class="workflow-step">
+              <strong>1. Refresh roles</strong>
+              Pull a fresh batch only when the current queue is exhausted or weak.
+              <div class="actions">
+                <button class="btn primary" onclick="refreshApplicationQueue()">Refresh options</button>
+                <button class="btn" onclick="showTab('discover')">Add sources</button>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <strong>2. Review the queue</strong>
+              ${review} role(s) need a keep/reject decision and ${approved} role(s) are already approved.
+              <div class="actions">
+                <button class="btn primary" onclick="showTab('auto_apply_queue')">Open queue</button>
+                <button class="btn" onclick="showTab('ats_scanner')">Check readiness</button>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <strong>3. Prepare one application</strong>
+              ${missingResearch ? `${missingResearch} current-batch draft(s) still need research or cleanup first.` : "Current batch research coverage is acceptable."}
+              <div class="actions">
+                <button class="btn primary" onclick="showTab('applications')">Open applications</button>
+                <button class="btn" onclick="showTab('resume_lab')">Check documents</button>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <strong>4. Send follow-ups</strong>
+              Review due reminders or send a thoughtful direct outreach email.
+              <div class="actions">
+                <button class="btn" onclick="showTab('outreach')">Open outreach</button>
+                <button class="btn" onclick="showTab('email')">Open email</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
       renderDailyReview();
       showReminderPopup(reminders);
     }
@@ -8443,14 +8514,15 @@ Record:
     function currentBatchApplications() {
       const completedStatuses = new Set(["submitted", "interview", "offer", "rejected"]);
       const activeApps = (state.applications || []).filter(app => !completedStatuses.has(String(app.status || "draft")));
-      const latestBatchId = activeApps.reduce((latest, app) => {
+      const actionableApps = activeApps.filter(app => !isBoardPrepBlockedApp(app));
+      const latestBatchId = actionableApps.reduce((latest, app) => {
         const batchId = String(app.batch_id || "");
         if (!batchId) return latest;
         return !latest || batchId > latest ? batchId : latest;
       }, "");
       const queueOrder = {approved: 0, review: 1, hold: 2};
       const queueState = app => normalizeQueueState(app.queue_state);
-      const apps = latestBatchId ? activeApps.filter(app => String(app.batch_id || "") === latestBatchId) : activeApps.slice(0, 5);
+      const apps = latestBatchId ? actionableApps.filter(app => String(app.batch_id || "") === latestBatchId) : actionableApps.slice(0, 5);
       return apps.slice().sort((a, b) => {
         const diff = (queueOrder[queueState(a)] ?? 9) - (queueOrder[queueState(b)] ?? 9);
         if (diff) return diff;
@@ -8461,6 +8533,19 @@ Record:
     function normalizeQueueState(value) {
       const normalized = String(value || "").toLowerCase();
       return ["review", "approved", "hold"].includes(normalized) ? normalized : "review";
+    }
+
+    function isBoardPrepBlockedUrl(url) {
+      const lower = String(url || "").toLowerCase();
+      return lower.includes("remoteok.com/remote-jobs/");
+    }
+
+    function isBoardPrepBlockedApp(app) {
+      return isBoardPrepBlockedUrl(app?.url || "");
+    }
+
+    function isActionableApplication(app) {
+      return !isBoardPrepBlockedApp(app);
     }
 
     function queueStateLabel(app) {
@@ -8526,6 +8611,7 @@ Record:
         const job = appJob(app);
         const isBlocked = activeBlockedDomain(app.url);
         const isThrottled = !isBlocked && activeThrottledDomain(app.url);
+        const boardBlocked = isBoardPrepBlockedApp(app);
         return `
           <div class="reminder">
             <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
@@ -8533,6 +8619,7 @@ Record:
             <p class="muted">${escapeHtml(nextApplicationAction(app))}</p>
             <div>
               <span class="tag">${escapeHtml(queueStateLabel(app))}</span>
+              ${boardBlocked ? `<span class="tag">needs direct apply link</span>` : ""}
               ${app.manual_first ? `<span class="tag">manual-first ATS</span>` : ""}
               ${isBlocked ? `<span class="tag">ats cooldown</span>` : ""}
               ${isThrottled ? `<span class="tag">ats rate limit</span>` : ""}
@@ -8543,8 +8630,9 @@ Record:
               <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
               <button class="btn" onclick="setApplicationQueueState(${app.id}, 'review')">Review</button>
               <button class="btn primary" onclick="selectApplication(${app.id})">Edit draft</button>
-              <button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>
+              ${boardBlocked ? "" : `<button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>`}
               <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">No thanks</button>
+              ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">${boardBlocked ? "Open listing" : "Open job"}</a>` : ""}
             </div>
           </div>
         `;
@@ -8574,7 +8662,7 @@ Record:
         ${throttled}
       `;
       controls.innerHTML = `
-        <p class="muted">Use the queue like an approval board: move strong roles into Approved, park uncertain ones on Hold, and reject weak roles. Sensitive ATSs are intentionally slowed.</p>
+        <p class="muted">Keep strong roles, hold uncertain ones, and reject weak ones.</p>
         <div class="actions">
           <button class="btn primary" onclick="refreshApplicationQueue()">Pull next batch</button>
           <button class="btn" onclick="cleanupStaleApplications()">Clean stale drafts</button>
@@ -8829,6 +8917,9 @@ Record:
     function nextApplicationAction(app) {
       const missing = missingApplicationItems(app);
       const requiredDraftMissing = !app.cover_letter || !app.answers || !app.follow_up;
+      if (isBoardPrepBlockedApp(app)) {
+        return "This role needs the real apply link before it can be prepared here.";
+      }
       if (app.status === "submitted" && app.next_follow_up && !app.follow_up_sent_at && daysUntil(app.next_follow_up) <= 0) {
         return "Send due follow-up.";
       }
@@ -9434,7 +9525,9 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       const viewMode = document.getElementById("application_view_mode")?.value || "current";
       const completedStatuses = new Set(["submitted", "interview", "offer", "rejected"]);
       const activeApps = (state.applications || []).filter(app => !completedStatuses.has(String(app.status || "draft")));
-      const latestBatchId = activeApps.reduce((latest, app) => {
+      const actionableActiveApps = activeApps.filter(isActionableApplication);
+      const hiddenActionlessCount = activeApps.length - actionableActiveApps.length;
+      const latestBatchId = actionableActiveApps.reduce((latest, app) => {
         const batchId = String(app.batch_id || "");
         if (!batchId) return latest;
         return !latest || batchId > latest ? batchId : latest;
@@ -9442,19 +9535,22 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       const visibleApps = viewMode === "all"
         ? (state.applications || [])
         : viewMode === "active"
-          ? activeApps
+          ? actionableActiveApps
           : latestBatchId
-            ? activeApps.filter(app => String(app.batch_id || "") === latestBatchId)
-            : activeApps.slice(0, 5);
+            ? actionableActiveApps.filter(app => String(app.batch_id || "") === latestBatchId)
+            : actionableActiveApps.slice(0, 5);
       if (blockedTarget) {
         const blocked = state.blocked_domains || [];
         const throttled = state.throttled_domains || [];
         const notices = [];
+        if (hiddenActionlessCount && viewMode !== "all") {
+          notices.push(`<div class="notice"><strong>${hiddenActionlessCount} draft(s) hidden here.</strong><br>They do not have a usable apply page yet.</div>`);
+        }
         if (blocked.length) {
-          notices.push(`<div class="notice bad"><strong>ATS cooldowns active.</strong><br>These domains recently showed restriction pages and will be blocked from Prepare form until their cooldown expires.</div>${blockedDomainSummaryHtml()}`);
+          notices.push(`<div class="notice bad"><strong>ATS cooldowns active.</strong><br>Some sites need a wait before the next try.</div>${blockedDomainSummaryHtml()}`);
         }
         if (throttled.length) {
-          notices.push(`<div class="notice"><strong>ATS pacing limits active.</strong><br>These domains were prepared recently and are being intentionally delayed before the next attempt.</div>${throttledDomainSummaryHtml()}`);
+          notices.push(`<div class="notice"><strong>ATS pacing limits active.</strong><br>Some sites are being slowed on purpose.</div>${throttledDomainSummaryHtml()}`);
         }
         blockedTarget.innerHTML = notices.join("");
       }
@@ -9463,28 +9559,28 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <h3>${escapeHtml(app.title)}</h3>
           <div class="meta">${escapeHtml(app.company)} - ${escapeHtml(followUpLabel(app))}</div>
           <div class="meta">${escapeHtml(contactSummary(app))}</div>
-          ${activeBlockedDomain(app.url) ? `<p class="bad">Prepare form is paused for ${escapeHtml(activeBlockedDomain(app.url).domain || "this ATS")} until ${escapeHtml(activeBlockedDomain(app.url).blocked_until || "")}.</p>` : ""}
-          ${!activeBlockedDomain(app.url) && activeThrottledDomain(app.url) ? `<p class="muted">Prepare form is being slowed for ${escapeHtml(activeThrottledDomain(app.url).domain || "this ATS")} until ${escapeHtml(activeThrottledDomain(app.url).next_allowed_at || "")}.</p>` : ""}
+          ${activeBlockedDomain(app.url) ? `<p class="bad">Paused until ${escapeHtml(activeBlockedDomain(app.url).blocked_until || "")}.</p>` : ""}
+          ${!activeBlockedDomain(app.url) && activeThrottledDomain(app.url) ? `<p class="muted">Try again after ${escapeHtml(activeThrottledDomain(app.url).next_allowed_at || "")}.</p>` : ""}
           <div>
             ${app.research_notes ? `<span class="tag">research saved</span>` : `<span class="tag">research needed</span>`}
             <span class="tag">quality ${escapeHtml(app.quality_score || 0)}</span>
             <span class="tag">${escapeHtml(queueStateLabel(app))}</span>
-            ${String(app.url || "").toLowerCase().includes("remoteok.com/remote-jobs/") ? `<span class="tag">board login wall</span>` : ""}
+            ${isBoardPrepBlockedApp(app) ? `<span class="tag">needs direct apply link</span>` : ""}
             ${app.manual_first ? `<span class="tag">manual-first ATS</span>` : ""}
             ${activeBlockedDomain(app.url) ? `<span class="tag">ats cooldown</span>` : ""}
             ${!activeBlockedDomain(app.url) && activeThrottledDomain(app.url) ? `<span class="tag">ats rate limit</span>` : ""}
             ${app.form_prep_started_at ? `<span class="tag">form prep ${escapeHtml(app.form_prep_report?.status || "started")}</span>` : ""}
             ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
           </div>
-          ${String(app.url || "").toLowerCase().includes("remoteok.com/remote-jobs/") ? `<p class="muted">This draft still uses a RemoteOK listing URL. Prepare form will be blocked until you switch it to a direct company or ATS apply URL.</p>` : ""}
+          ${isBoardPrepBlockedApp(app) ? `<p class="muted">This one still needs the real apply link.</p>` : ""}
           <div class="actions">
             <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
             <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
             <button class="btn primary" onclick="selectApplication(${app.id})">Edit</button>
-            <button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>
-            <button class="btn" onclick="resumeApplicationCard(${app.id})">Resume form</button>
+            ${isBoardPrepBlockedApp(app) ? "" : `<button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>`}
+            ${isBoardPrepBlockedApp(app) ? "" : `<button class="btn" onclick="resumeApplicationCard(${app.id})">Resume form</button>`}
             <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">No thanks</button>
-            ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">Open job</a>` : ""}
+            ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">${isBoardPrepBlockedApp(app) ? "Open listing" : "Open job"}</a>` : ""}
             <a class="btn" href="${mailto(app)}">Email draft</a>
           </div>
         </div>
@@ -9760,6 +9856,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       selectedLead = (state.leads || []).find(lead => lead.id === id);
       if (!selectedLead) return;
       const lead = selectedLead;
+      const subject = outreachSubjectPreview(lead);
       document.getElementById("leadEditor").innerHTML = `
         <h3>${escapeHtml(lead.company || "Company lead")}</h3>
         <div class="row">
@@ -9776,17 +9873,23 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         </div>
         <label>Contact email</label><input id="edit_lead_contact_email" value="${escapeAttr(lead.contact_email || "")}">
         <label>Source URL</label><input id="edit_lead_source_url" value="${escapeAttr(lead.source_url || "")}">
-        <label>Why this company / personalization notes</label><textarea id="edit_lead_company_notes">${escapeHtml(lead.company_notes || "")}</textarea>
-        <label>Outreach email</label><textarea id="edit_lead_outreach_email" style="min-height:240px">${escapeHtml(lead.outreach_email || "")}</textarea>
+        <label>Why this brand fits / why you fit</label><textarea id="edit_lead_company_notes">${escapeHtml(lead.company_notes || "")}</textarea>
+        <label>Subject line preview</label><input id="edit_lead_subject" value="${escapeAttr(subject)}" readonly>
+        <label>Draft email</label><textarea id="edit_lead_outreach_email" style="min-height:280px">${escapeHtml(lead.outreach_email || "")}</textarea>
         <div class="actions">
           <button class="btn primary" onclick="saveLeadEdit()">Save lead</button>
-          <button class="btn" onclick="generateLeadEmail()">Generate personalized outreach</button>
-          <button class="btn" onclick="humanizeLeadEmail()">Humanize outreach</button>
-          <button class="btn warn" onclick="sendLeadEmail()">Send outreach</button>
+          <button class="btn" onclick="generateLeadEmail()">Build outreach email</button>
+          <button class="btn" onclick="humanizeLeadEmail()">Polish tone</button>
+          <button class="btn warn" onclick="sendLeadEmail()">Send this email</button>
           <button class="btn" onclick="setLeadStatus(${lead.id}, 'do-not-contact')">Do not contact</button>
         </div>
       `;
       if (switchTab) showTab("outreach");
+    }
+
+    function outreachSubjectPreview(lead) {
+      const company = String(lead?.company || "").trim() || "your company";
+      return `Quick introduction - marketing support for ${company}`;
     }
 
     function contactLeadSummary(lead) {
@@ -10252,7 +10355,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       ["company", "website", "industry", "source_url", "contact_name", "contact_role", "contact_email", "company_notes"].forEach(key => {
         document.getElementById(`lead_${key}`).value = "";
       });
-      message("Company lead saved.");
+      message("Outreach lead saved.");
       await load();
       showTab("outreach");
     }
@@ -10261,7 +10364,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       if (!selectedLead) return;
       const payload = leadPayloadFrom("edit_lead", selectedLead.id);
       await api("/api/leads/save", {method: "POST", body: JSON.stringify(payload)});
-      message("Company lead saved.");
+      message("Outreach lead saved.");
       await load();
     }
 
@@ -10270,7 +10373,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       const payload = leadPayloadFrom("edit_lead", selectedLead.id);
       const result = await api("/api/leads/generate", {method: "POST", body: JSON.stringify(payload)});
       document.getElementById("edit_lead_outreach_email").value = result.outreach_email || "";
-      message("Personalized outreach generated.");
+      message("Outreach email drafted.");
       await load();
     }
 
@@ -10286,7 +10389,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       document.getElementById("edit_lead_outreach_email").value = result.outreach_email || "";
       const check = result.check || {};
       const flagged = (check.flags || []).length + (check.long_sentence_count || 0);
-      message(flagged ? `Humanized outreach, but ${flagged} voice issue(s) still need review.` : "Humanized outreach in Phillip's voice.");
+      message(flagged ? `Tone polished, but ${flagged} thing(s) still need a quick review.` : "Tone polished in your voice.");
       await load();
     }
 
@@ -10638,12 +10741,22 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
 
     async function prepareApplicationCard(id) {
       selectApplication(id, false);
+      if (isBoardPrepBlockedApp(selectedApplication)) {
+        message("This draft still points to a board listing, not the real apply page. Open the listing, find the direct company or ATS apply URL, then prepare the form from that real page.", "bad");
+        showTab("applications");
+        return;
+      }
       await prepareApplicationForm();
       showTab("applications");
     }
 
     async function resumeApplicationCard(id) {
       selectApplication(id, false);
+      if (isBoardPrepBlockedApp(selectedApplication)) {
+        message("This draft still points to a board listing, not the real apply page. Replace it with a real apply URL before resuming form prep.", "bad");
+        showTab("applications");
+        return;
+      }
       await resumeApplicationForm();
       showTab("applications");
     }
