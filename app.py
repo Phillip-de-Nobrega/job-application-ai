@@ -298,17 +298,27 @@ ENTRY_LEVEL_SIGNALS = [
 
 MARKETING_TITLE_SIGNALS = [
     "marketing",
+    "marketer",
     "brand",
     "content",
     "social",
+    "media",
     "growth",
     "community",
     "communications",
     "campaign",
     "partnership",
     "advertising",
+    "ppc",
+    "paid media",
+    "digital media",
+    "media strategist",
+    "lifecycle",
+    "crm",
+    "seo",
     "creative strategist",
     "copywriter",
+    "writer",
     "content creator",
     "marketing coordinator",
     "marketing specialist",
@@ -1758,7 +1768,7 @@ def should_keep_discovered_role(title: str, company: str, description: str, quer
         return True
     if marketing_title and description_marketing and not any(term in lower_title for term in ["manager", "director", "head of", "vice president", "vp ", "principal"]):
         return True
-    if query_hit and description_marketing and not any(term in lower_title for term in NON_TARGET_TITLE_SIGNALS):
+    if marketing_title and query_hit and description_marketing and not any(term in lower_title for term in NON_TARGET_TITLE_SIGNALS):
         return True
     return False
 
@@ -2737,6 +2747,77 @@ def set_application_queue_state(application_id: int, queue_state: str) -> dict[s
         )
         conn.commit()
     return {"id": application_id, "queue_state": normalized}
+
+
+def stale_application_reason(job: dict[str, Any]) -> str:
+    concerns = str(job.get("concerns", "")).lower()
+    title = str(job.get("title", "")).lower()
+    if "not an early-career role" in concerns or "possible seniority mismatch" in concerns or any(term in title for term in ["director", "vice president", "vp ", "head of", "manager"]):
+        return "too senior"
+    if "role-title mismatch" in concerns:
+        return "not really marketing"
+    if "outside cape town" in concerns or "physical location is not cape town" in concerns or "us non-remote" in concerns or "would require relocation" in concerns:
+        return "wrong location"
+    if "remote role appears restricted" in concerns or "remote role text suggests geographic restrictions" in concerns:
+        return "remote eligibility unclear"
+    return "poor fit"
+
+
+def cleanup_stale_applications() -> dict[str, Any]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            select applications.id as application_id, applications.status, applications.queue_state,
+                   jobs.id as job_id, jobs.title, jobs.company, jobs.score, jobs.concerns, jobs.description
+            from applications
+            join jobs on jobs.id = applications.job_id
+            where applications.status in ('draft', 'ready')
+            """
+        ).fetchall()
+        cleaned: list[dict[str, Any]] = []
+        timestamp = now_iso()
+        for row in rows:
+            item = row_to_dict(row) or {}
+            concerns = str(item.get("concerns", "")).lower()
+            score = int(item.get("score") or 0)
+            keep_role = should_keep_discovered_role(
+                str(item.get("title", "")),
+                str(item.get("company", "")),
+                str(item.get("description", "")),
+                GRADUATE_MARKETING_DISCOVERY_QUERY,
+            )
+            if (
+                score < 35
+                or "not an early-career role" in concerns
+                or "possible seniority mismatch" in concerns
+                or "role-title mismatch" in concerns
+                or "outside cape town" in concerns
+                or "physical location is not cape town" in concerns
+                or "us non-remote" in concerns
+                or "would require relocation" in concerns
+                or not keep_role
+            ):
+                reason = "not really marketing" if not keep_role else stale_application_reason(item)
+                too_senior = 1 if reason == "too senior" else int("too_senior" in concerns)
+                conn.execute(
+                    "update applications set status='rejected', reject_reason=?, updated_at=? where id=?",
+                    (reason, timestamp, int(item["application_id"])),
+                )
+                conn.execute(
+                    "update jobs set status='rejected', reject_reason=?, too_senior=?, updated_at=? where id=?",
+                    (reason, too_senior, timestamp, int(item["job_id"])),
+                )
+                cleaned.append(
+                    {
+                        "application_id": int(item["application_id"]),
+                        "job_id": int(item["job_id"]),
+                        "company": str(item.get("company", "")),
+                        "title": str(item.get("title", "")),
+                        "reason": reason,
+                    }
+                )
+        conn.commit()
+    return {"count": len(cleaned), "items": cleaned}
 
 
 def reject_application_and_replace(application_id: int, reason: str = "", notes: str = "") -> dict[str, Any]:
@@ -5022,7 +5103,7 @@ def ats_prep_stats(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         reports = max(1, int(bucket["reports"]))
         fields_seen = max(1, int(bucket["fields_seen"]))
         bucket["completion_rate"] = round((int(bucket["completed"]) / reports) * 100)
-        bucket["fill_rate"] = round((int(bucket["fields_filled"]) / fields_seen) * 100)
+        bucket["fill_rate"] = min(100, round((int(bucket["fields_filled"]) / fields_seen) * 100))
     return sorted(
         stats.values(),
         key=lambda item: (
@@ -6686,6 +6767,9 @@ class AppHandler(BaseHTTPRequestHandler):
                     str(data.get("reason") or ""),
                     str(data.get("notes") or ""),
                 )
+                self.json({"ok": True, **result})
+            elif parsed.path == "/api/applications/cleanup-stale":
+                result = cleanup_stale_applications()
                 self.json({"ok": True, **result})
             elif parsed.path == "/api/applications/queue-state":
                 app_id = int(data.get("id") or 0)
@@ -8493,6 +8577,7 @@ Record:
         <p class="muted">Use the queue like an approval board: move strong roles into Approved, park uncertain ones on Hold, and reject weak roles. Sensitive ATSs are intentionally slowed.</p>
         <div class="actions">
           <button class="btn primary" onclick="refreshApplicationQueue()">Pull next batch</button>
+          <button class="btn" onclick="cleanupStaleApplications()">Clean stale drafts</button>
           <button class="btn" onclick="approveSafeQueueRoles()">Approve safe roles</button>
           <button class="btn" onclick="holdBlockedQueueRoles()">Hold blocked ATS roles</button>
           <button class="btn" onclick="returnQueueToReview()">Reset queue to review</button>
@@ -10334,6 +10419,15 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         await api("/api/applications/queue-state", {method: "POST", body: JSON.stringify({id, queue_state: "approved"})});
       }
       message(`Approved ${ids.length} safe role${ids.length === 1 ? "" : "s"} in the current batch.`);
+      await load();
+      showTab("auto_apply_queue");
+    }
+
+    async function cleanupStaleApplications() {
+      const confirmed = confirm("Reject active drafts that no longer fit the graduate-marketing target and remove them from the live queue?");
+      if (!confirmed) return;
+      const result = await api("/api/applications/cleanup-stale", {method: "POST", body: "{}"});
+      message(result.count ? `Cleaned ${result.count} stale draft${result.count === 1 ? "" : "s"} from the queue.` : "No stale drafts needed cleanup.");
       await load();
       showTab("auto_apply_queue");
     }
