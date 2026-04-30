@@ -613,6 +613,80 @@ function motivationText(task) {
   return shortText(parts.join("\n\n"), 900);
 }
 
+function customPromptAnswer(prompt, task, field = {}) {
+  const app = task.application || {};
+  const promptText = String(prompt || "").toLowerCase();
+  const jobText = `${task.job?.title || ""} ${task.job?.description || ""}`.toLowerCase();
+
+  if (/are you at least 18 years old/.test(promptText)) {
+    return { value: "Yes", review: false, reason: "Age confirmation answered directly." };
+  }
+  if (/do you have a sleeper profile|sleeper username/.test(promptText)) {
+    return {
+      value: "I do not currently have a Sleeper profile to share.",
+      review: true,
+      reason: "Edit this if you have a real Sleeper username."
+    };
+  }
+  if (/what sport are you interested in covering/.test(promptText)) {
+    return {
+      value: "F1, with strong secondary interest in UFC and golf.",
+      review: true,
+      reason: "Drafted from the role mix and your sports/fitness fit."
+    };
+  }
+  if (/5 mock posts|mock drafts of posts on x|running a sleeper account/.test(promptText)) {
+    return {
+      value: [
+        "1. SleeperF1: Piastri on pole and the long-run pace looked real, not fluky. If McLaren converts cleanly at the start, this race shifts from strategy chess to damage control for everyone behind them.",
+        "2. SleeperUFC: If this main event gets past round two, the live edge flips hard to the better cardio and clinch control. Early power matters, but pace wins messy fights.",
+        "3. SleeperGolf: Morning wave looks cleaner for scoring, but if the wind turns by the back nine the whole slate changes. Tee-time edges matter more than people think at this course.",
+        "4. SleeperTennis: This matchup is less about ranking and more about hold percentage under pressure. If the underdog keeps first-serve points above 70%, this gets very live very quickly.",
+        "5. SleeperF1: Quiet fantasy angle for Sunday: midfield teams that protect tyre life in the first stint could jump two or three places on strategy alone. Not flashy, but that is usually where value hides."
+      ].join("\n\n"),
+      review: true,
+      reason: "Mock social drafts created for the prompt. Tighten them to the sport you want most."
+    };
+  }
+  if (/days where there are no games|grow your sports page on days where there are no games/.test(promptText)) {
+    return {
+      value: "I would treat off-days as audience-building days rather than dead days. I would use them for reaction clips, evergreen explainers, quick stat-led posts, memes when they fit the brand, prediction threads, fan questions, and storylines that set up the next event. I would also test repeatable formats so the page builds a voice people come back for even when there is no live action.",
+      review: true,
+      reason: "Drafted for sports content strategy."
+    };
+  }
+  if (/rank the content sources|content sources you browse most often/.test(promptText)) {
+    return {
+      value: "1. Official league, team, driver, and fighter accounts\n2. Trusted live reporters and beat writers on X\n3. Broadcast clips, post-race or post-fight interviews, and press conferences\n4. Stats and analytics accounts or databases\n5. Reddit and fan communities, mainly to spot emerging storylines rather than to treat them as primary sources",
+      review: true,
+      reason: "Drafted for sports research workflow."
+    };
+  }
+  if (/authorized to work legally in the us|legally authorized to work in the us/.test(promptText)) {
+    return {
+      choice: "No, I am not legally authorized to work in the US",
+      value: "No, I am not legally authorized to work in the US",
+      review: true,
+      reason: "Truthful default from your profile. Review before submit."
+    };
+  }
+  if (/city, state \(must be in us\)|must be in us/.test(promptText) && /sleeper/.test(jobText)) {
+    return {
+      value: "Cape Town, Western Cape",
+      review: true,
+      reason: "US-specific location wording on a remote-friendly role. Review before submit."
+    };
+  }
+  if (field.tag === "textarea") {
+    return {
+      value: app.answers || app.cover_letter || motivationText(task) || "",
+      review: true,
+      reason: "General long-form answer drafted from the application pack."
+    };
+  }
+  return null;
+}
+
 async function fillTextAreas(page, task, report) {
   const app = task.application || {};
   const profile = task.profile || {};
@@ -673,6 +747,7 @@ async function answerCommonScreening(page, task, report) {
   await chooseRadioOrCheckbox(page, ["prefer not", "decline to self", "i do not wish"], "prefer not to answer", report);
   await fillByLabels(page, ["work authorization", "right to work", "visa"], profile.work_authorization, "work authorization", report);
   await fillByLabels(page, ["salary expectation", "expected salary", "compensation"], profile.salary_expectation, "salary expectation", report);
+  await chooseRadioOrCheckbox(page, ["no,? i am not legally authorized to work in the us"], "US work authorization", report);
 }
 
 async function scanComboboxFields(page) {
@@ -1114,6 +1189,14 @@ function answerForCategory(category, field, task) {
   if (category === "work_authorization") {
     const prompt = `${field.prompt || ""} ${field.name || ""}`.toLowerCase();
     const jobText = `${task.job?.location || ""} ${task.job?.description || ""}`.toLowerCase();
+    if (/authorized to work legally in the us|legally authorized to work in the us/.test(prompt)) {
+      return {
+        choice: "No, I am not legally authorized to work in the US",
+        value: "No, I am not legally authorized to work in the US",
+        review: true,
+        reason: "Truthful default for US work authorization from your profile."
+      };
+    }
     const sponsorship = /sponsorship|require sponsorship|need sponsorship/.test(prompt);
     const southAfrica = /south africa/.test(prompt) || /south africa|cape town/.test(jobText);
     const unitedKingdom = /\buk\b|united kingdom|britain/.test(prompt) || /\buk\b|united kingdom|london/.test(jobText);
@@ -1152,6 +1235,8 @@ function answerForCategory(category, field, task) {
       reason: "General custom question answer; review before submit."
     };
   }
+  const custom = customPromptAnswer(field.prompt || field.name || field.id || "", task, field);
+  if (custom) return custom;
   return { value: "" };
 }
 
@@ -1240,6 +1325,7 @@ async function fillScannedFields(page, task, report, stepLabel = "step-1") {
   for (const field of fields) {
     const prompt = field.prompt || field.name || field.id || "Unnamed field";
     const category = classifyField(field);
+    const derivedAnswer = !category ? customPromptAnswer(prompt, task, field) : null;
     if (category === "cv_upload") {
       try {
         const locator = allLocators.nth(field.index);
@@ -1306,7 +1392,7 @@ async function fillScannedFields(page, task, report, stepLabel = "step-1") {
       }
       continue;
     }
-    if (!category) continue;
+    if (!category && !derivedAnswer) continue;
     const currentValue = String(field.currentValue || "").trim();
     const looksLikeBadPrefill = Boolean(
       currentValue
@@ -1315,8 +1401,8 @@ async function fillScannedFields(page, task, report, stepLabel = "step-1") {
     );
     if (currentValue && !looksLikeBadPrefill) continue;
     const locator = allLocators.nth(field.index);
-    const answer = answerForCategory(category, field, task);
-    answer.category = category;
+    const answer = derivedAnswer || answerForCategory(category, field, task);
+    answer.category = category || "custom_question";
     try {
       if (looksLikeBadPrefill) {
         await locator.fill("", { timeout: 3000 }).catch(() => {});
@@ -1358,6 +1444,38 @@ function persistReport(task, report) {
   if (!task.report_path) return;
   ensureDir(task.report_path);
   fs.writeFileSync(task.report_path, JSON.stringify(report, null, 2), "utf8");
+}
+
+function recordEvent(task, report, stage, message, extra = {}) {
+  const at = nowIso();
+  report.current_stage = stage;
+  report.last_event_at = at;
+  report.heartbeat_at = at;
+  report.events = Array.isArray(report.events) ? report.events : [];
+  report.events.push({
+    at,
+    stage,
+    message,
+    url: extra.url || report.last_url || "",
+    ...extra
+  });
+  if (report.events.length > 60) {
+    report.events = report.events.slice(-60);
+  }
+  persistReport(task, report);
+}
+
+function startHeartbeat(task, report) {
+  report.heartbeat_at = nowIso();
+  persistReport(task, report);
+  return setInterval(() => {
+    report.heartbeat_at = nowIso();
+    persistReport(task, report);
+  }, 5000);
+}
+
+function stopHeartbeat(timer) {
+  if (timer) clearInterval(timer);
 }
 
 function cooldownHoursForBlocker(platform, url = "") {
@@ -1419,7 +1537,7 @@ async function waitForManualClearance(page, task, report, blocker) {
       prompt: "ATS restriction page",
       reason: `${blocker.message} Cooldown set until ${blockedUntil}. Retry later and avoid rapid repeated attempts on this ATS.`
     });
-    persistReport(task, report);
+    recordEvent(task, report, "blocked-domain", blocker.message, { url: blocker.url || page.url(), blocked_until: blockedUntil });
     return false;
   }
   report.status = "waiting-user-action";
@@ -1430,7 +1548,7 @@ async function waitForManualClearance(page, task, report, blocker) {
     detected_at: report.blocker?.detected_at || nowIso(),
     last_seen_at: nowIso()
   };
-  persistReport(task, report);
+  recordEvent(task, report, `waiting-${blocker.kind}`, blocker.message, { url: blocker.url || page.url() });
   const started = Date.now();
   const timeoutMs = 20 * 60 * 1000;
   while (Date.now() - started < timeoutMs) {
@@ -1440,7 +1558,7 @@ async function waitForManualClearance(page, task, report, blocker) {
     if (!current) {
       report.blocker.cleared_at = nowIso();
       report.status = "resuming";
-      persistReport(task, report);
+      recordEvent(task, report, `cleared-${blocker.kind}`, `Manual ${blocker.kind} prompt was cleared.`, { url: page.url() });
       return true;
     }
     report.blocker.last_seen_at = nowIso();
@@ -1452,7 +1570,7 @@ async function waitForManualClearance(page, task, report, blocker) {
     reason: `The ${blocker.kind} prompt stayed visible for more than 20 minutes. Clear it manually, then use Resume form if needed.`
   });
   report.status = "waiting-user-action";
-  persistReport(task, report);
+  recordEvent(task, report, `timeout-${blocker.kind}`, `Manual ${blocker.kind} prompt remained visible too long.`, { url: page.url() });
   return false;
 }
 
@@ -1684,9 +1802,13 @@ async function main() {
 
   const report = {
     created_at: task.created_at || new Date().toISOString(),
+    started_at: nowIso(),
     task_path: taskPath,
     platform: inferPlatform(task),
     status: "started",
+    current_stage: "launching-browser",
+    heartbeat_at: nowIso(),
+    last_event_at: nowIso(),
     browser: {},
     clicked_apply: false,
     visited_urls: [],
@@ -1697,11 +1819,15 @@ async function main() {
     filled_fields: [],
     skipped_fields: [],
     review_fields: [],
-    errors: []
+    errors: [],
+    events: []
   };
+
+  persistReport(task, report);
 
   const dataDir = path.dirname(path.dirname(taskPath));
   const statePath = path.join(dataDir, "playwright-storage-state.json");
+  let heartbeat = null;
   const browser = await launchBestBrowser(report);
   const context = await browser.newContext({
     viewport: { width: 1380, height: 920 },
@@ -1710,10 +1836,13 @@ async function main() {
   });
   let page = await context.newPage();
   page.setDefaultTimeout(7000);
+  heartbeat = startHeartbeat(task, report);
+  recordEvent(task, report, "browser-opened", "Visible browser launched for form preparation.");
 
   try {
     const platform = inferPlatform(task, task.job.url);
     console.log(`opening ${task.job.url}`);
+    recordEvent(task, report, "prelogin-check", "Checking for reusable session or saved login.");
     await preLoginIfConfigured(page, task, report, platform);
     if (report.status === "waiting-user-action") {
       await saveSessionState(context, statePath, report);
@@ -1722,9 +1851,12 @@ async function main() {
       if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
+    recordEvent(task, report, "opening-job-url", "Opening the saved job or application URL.", { url: task.job.url });
     await page.goto(task.job.url, { waitUntil: "domcontentloaded", timeout: 45000 });
     await settlePage(page, platform);
     pushUnique(report.visited_urls, page.url());
+    report.last_url = page.url();
+    recordEvent(task, report, "job-page-opened", "Initial page loaded.", { url: page.url() });
     if (!(await resolveBlockerIfPresent(page, task, report))) {
       await saveSessionState(context, statePath, report);
       await addReviewBanner(page, task).catch(() => {});
@@ -1732,6 +1864,7 @@ async function main() {
       if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
+    recordEvent(task, report, "login-check", "Checking whether this page needs login.");
     await attemptLoginIfNeeded(page, task, report);
     await saveSessionState(context, statePath, report);
     if (!(await resolveBlockerIfPresent(page, task, report))) {
@@ -1741,7 +1874,10 @@ async function main() {
       if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
+    recordEvent(task, report, "apply-click", "Trying to reach the real application form.", { url: page.url() });
     page = await clickApplyIfPresent(page, report, platform);
+    report.last_url = page.url();
+    recordEvent(task, report, "application-page", "Reached the current application page.", { url: page.url() });
     await saveSessionState(context, statePath, report);
     if (!(await resolveBlockerIfPresent(page, task, report))) {
       await saveSessionState(context, statePath, report);
@@ -1750,13 +1886,18 @@ async function main() {
       if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
+    recordEvent(task, report, "post-apply-login-check", "Checking again for login or gated steps.");
     await attemptLoginIfNeeded(page, task, report);
     await saveSessionState(context, statePath, report);
     let lastFingerprint = "";
     for (let step = 1; step <= 6; step += 1) {
+      recordEvent(task, report, `scan-step-${step}`, `Scanning and filling visible fields on step ${step}.`, { url: page.url(), step });
       const stepResult = await fillCurrentStep(page, task, report, `step-${step}`);
       page = stepResult.page;
       const fields = stepResult.fields;
+      report.last_url = page.url();
+      report.field_count = Array.isArray(fields) ? fields.length : 0;
+      recordEvent(task, report, `fields-step-${step}`, `Detected ${report.field_count} field(s) on step ${step}.`, { url: page.url(), step, field_count: report.field_count });
       if (!(await resolveBlockerIfPresent(page, task, report))) {
         await saveSessionState(context, statePath, report);
         await addReviewBanner(page, task).catch(() => {});
@@ -1765,10 +1906,18 @@ async function main() {
         return;
       }
       const fingerprint = fieldFingerprint(fields);
-      if (fingerprint && fingerprint === lastFingerprint) break;
+      if (fingerprint && fingerprint === lastFingerprint) {
+        recordEvent(task, report, `stable-step-${step}`, `The visible field set stopped changing after step ${step}.`, { url: page.url(), step });
+        break;
+      }
       lastFingerprint = fingerprint;
       const advancedWith = await clickSafeContinue(page, report, platform);
-      if (!advancedWith) break;
+      if (!advancedWith) {
+        recordEvent(task, report, `review-stop-step-${step}`, `No safe continue button was found after step ${step}.`, { url: page.url(), step });
+        break;
+      }
+      report.last_url = page.url();
+      recordEvent(task, report, `advanced-step-${step}`, `Moved to the next step using '${advancedWith}'.`, { url: page.url(), step, action: advancedWith });
       if (!(await resolveBlockerIfPresent(page, task, report))) {
         await saveSessionState(context, statePath, report);
         await addReviewBanner(page, task).catch(() => {});
@@ -1780,16 +1929,19 @@ async function main() {
       await saveSessionState(context, statePath, report);
     }
     await saveSessionState(context, statePath, report);
+    recordEvent(task, report, "review-ready", "Form preparation reached the review handoff point.", { url: page.url() });
     await addReviewBanner(page, task).catch(() => {});
     await saveArtifacts(page, task, report);
     console.log("Form preparation complete. Review manually and submit yourself. Close the browser when done.");
     if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
   } catch (error) {
     report.errors.push(error.stack || error.message);
+    recordEvent(task, report, "error", error.message || "Form preparation failed.", { url: page?.url?.() || report.last_url || "" });
     await saveSessionState(context, statePath, report).catch(() => {});
     await saveArtifacts(page, task, report).catch(() => {});
     throw error;
   } finally {
+    stopHeartbeat(heartbeat);
     await browser.close().catch(() => {});
   }
 }

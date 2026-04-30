@@ -100,7 +100,8 @@ DEFAULT_PROFILE: dict[str, str] = {
 
 GRADUATE_MARKETING_DISCOVERY_QUERY = (
     "graduate junior entry level marketing coordinator marketing assistant "
-    "brand assistant social media assistant content creator community coordinator campaign coordinator"
+    "brand assistant social media assistant content creator community coordinator "
+    "campaign coordinator copywriter crm executive content curator remote cape town uk"
 )
 
 
@@ -1745,17 +1746,37 @@ def graduate_query_terms(query: str = "") -> list[str]:
     return query_terms_from_text(query or GRADUATE_MARKETING_DISCOVERY_QUERY, GRADUATE_MARKETING_DISCOVERY_QUERY)
 
 
-def should_keep_discovered_role(title: str, company: str, description: str, query: str = "") -> bool:
+def should_keep_discovered_role(title: str, company: str, description: str, query: str = "", location: str = "") -> bool:
     lower_title = normalize_space(title).lower()
     lower_description = normalize_space(description).lower()
-    combined = f"{lower_title} {normalize_space(company).lower()} {lower_description}"
+    lower_location = normalize_space(location).lower()
+    combined = f"{lower_title} {normalize_space(company).lower()} {lower_description} {lower_location}"
     if not lower_title:
+        return False
+    if any(term in combined for term in ["werkstudent", "praktikant", "praktikum", "pflichtpraktikum", "m/w/d", "100 prozent im home-office", "100% homeoffice", "unpaid internship", "mandatory 6 months unpaid internship"]):
         return False
     if any(term in lower_title for term in HARD_NON_TARGET_TITLE_SIGNALS):
         return False
     if any(term in lower_title for term in ["engineer", "developer", "devops", "backend", "frontend", "designer"]):
         return False
     if any(term in lower_title for term in ["manager", "director", "head of", "vice president", "vp ", "principal"]) and not any(term in lower_title for term in ["assistant", "junior", "graduate", "associate", "coordinator", "specialist", "executive"]):
+        return False
+    _, _, location_concerns = assess_location_fit(location, f"{title}\n{description}")
+    location_concerns_text = " ".join(location_concerns).lower()
+    if any(
+        term in location_concerns_text
+        for term in [
+            "physical location is not cape town",
+            "outside cape town/remote target",
+            "us non-remote",
+            "would require relocation",
+            "remote role appears based",
+            "remote role is tied to a specific city/country",
+            "remote role appears restricted",
+            "remote role text suggests geographic restrictions",
+            "location appears outside cape town/remote target",
+        ]
+    ):
         return False
     marketing_title = any(term in lower_title for term in MARKETING_TITLE_SIGNALS)
     entry_title = any(term in lower_title for term in ENTRY_LEVEL_SIGNALS)
@@ -1835,7 +1856,7 @@ def discover_greenhouse(conn: sqlite3.Connection, board_token: str, query: str =
         title = str(item.get("title", "") or "")
         company = str(payload.get("name", board_token) or board_token)
         description = plain_text_from_html(item.get("content", ""))
-        if query and not should_keep_discovered_role(title, company, description, query):
+        if query and not should_keep_discovered_role(title, company, description, query, location):
             continue
         ids.append(
             upsert_job(
@@ -1873,7 +1894,7 @@ def discover_lever(conn: sqlite3.Connection, site: str, query: str = "") -> dict
             ]
         )
         title = str(item.get("text", "") or "")
-        if query and not should_keep_discovered_role(title, site, description, query):
+        if query and not should_keep_discovered_role(title, site, description, query, categories.get("location", "")):
             continue
         ids.append(
             upsert_job(
@@ -1904,7 +1925,7 @@ def discover_ashby(conn: sqlite3.Connection, board: str, query: str = "") -> dic
         description = plain_text_from_html(item.get("descriptionHtml") or item.get("descriptionPlain") or "")
         job_url = item.get("jobUrl") or item.get("applyUrl") or ""
         title = str(item.get("title", "") or "")
-        if query and not should_keep_discovered_role(title, board, description, query):
+        if query and not should_keep_discovered_role(title, board, description, query, location):
             continue
         ids.append(
             upsert_job(
@@ -1970,7 +1991,7 @@ def discover_smartrecruiters(conn: sqlite3.Connection, company_identifier: str, 
         ]
         description = plain_text_from_html("\n\n".join(str(part) for part in description_parts if part))
         title = str(detail.get("name") or item.get("name") or "")
-        if query and not should_keep_discovered_role(title, company_identifier, description, query):
+        if query and not should_keep_discovered_role(title, company_identifier, description, query, location):
             continue
         job_url = (
             detail.get("ref")
@@ -2016,7 +2037,7 @@ def discover_recruitee(conn: sqlite3.Connection, subdomain: str, query: str = ""
             if item.get(key)
         )
         title = str(item.get("title", "") or "")
-        if query and not should_keep_discovered_role(title, subdomain, plain_text_from_html(description or ""), query):
+        if query and not should_keep_discovered_role(title, subdomain, plain_text_from_html(description or ""), query, location):
             continue
         location_data = item.get("location") or {}
         if isinstance(location_data, dict):
@@ -2075,7 +2096,7 @@ def discover_remotive(conn: sqlite3.Connection, category: str = "marketing", que
         if not job_url and item.get("id"):
             job_url = f"https://remotive.com/remote-jobs/{item.get('id')}"
         tags = item.get("tags") if isinstance(item.get("tags"), list) else []
-        if not should_keep_discovered_role(title, company, description + " " + " ".join(str(tag) for tag in tags), query):
+        if not should_keep_discovered_role(title, company, description + " " + " ".join(str(tag) for tag in tags), query, location):
             continue
         ids.append(
             upsert_job(
@@ -2130,7 +2151,7 @@ def discover_remoteok(conn: sqlite3.Connection, token: str = "", query: str = ""
         combined = " ".join([title, company, description, " ".join(str(tag) for tag in tags)]).lower()
         if query_terms and not any(term in combined for term in query_terms):
             continue
-        if not should_keep_discovered_role(title, company, description + " " + " ".join(str(tag) for tag in tags), query or token):
+        if not should_keep_discovered_role(title, company, description + " " + " ".join(str(tag) for tag in tags), query or token, normalize_space(str(item.get("location") or "Remote - Worldwide")) or "Remote - Worldwide"):
             continue
         job_url = str(item.get("url") or "")
         if job_url and job_url.startswith("/"):
@@ -2184,7 +2205,7 @@ def discover_arbeitnow(conn: sqlite3.Connection, token: str = "", query: str = "
         combined = " ".join([title, company, description, " ".join(str(tag) for tag in tags)]).lower()
         if query_terms and not any(term in combined for term in query_terms):
             continue
-        if not should_keep_discovered_role(title, company, description + " " + " ".join(str(tag) for tag in tags), query or token):
+        if not should_keep_discovered_role(title, company, description + " " + " ".join(str(tag) for tag in tags), query or token, f"Remote - {normalize_space(str(item.get('location') or ''))}" if item.get('remote') and normalize_space(str(item.get('location') or '')) else (normalize_space(str(item.get('location') or '')) or ('Remote - Europe' if item.get('remote') else ''))):
             continue
         location = normalize_space(str(item.get("location") or ""))
         if item.get("remote"):
@@ -2785,6 +2806,7 @@ def cleanup_stale_applications() -> dict[str, Any]:
                 str(item.get("company", "")),
                 str(item.get("description", "")),
                 GRADUATE_MARKETING_DISCOVERY_QUERY,
+                str(item.get("location", "")),
             )
             if (
                 score < 35
@@ -4722,12 +4744,16 @@ def compose_follow_up(profile: dict[str, str], job: dict[str, Any], application:
 def compose_cold_outreach(profile: dict[str, str], company: str, contact_name: str = "", company_notes: str = "") -> str:
     sender_name = profile.get("full_name", "Phillip de Nobrega")
     greeting = f"Hi {contact_name}," if contact_name else f"Hi {company} team,"
-    reason = company_notes or "your brand and the way it connects with its audience"
+    reason = normalize_space(company_notes).rstrip(".")
+    if reason:
+        brand_line = f"What stands out to me is {reason}."
+    else:
+        brand_line = "What stands out to me is the way the brand connects with its audience."
     return phillip_voice_text(textwrap.dedent(
         f"""
         {greeting}
 
-        I wanted to reach out because I have been following {company} and was genuinely drawn to {reason}. I am a UCT Business Science Marketing graduate with hands-on experience across content creation, market research, brand thinking, Google Analytics, Meta Ads Manager, Canva, and AI-assisted product work.
+        I wanted to reach out because I have been following {company} for a while. {brand_line} I am a UCT Business Science Marketing graduate with hands-on experience across content creation, market research, brand thinking, Google Analytics, Meta Ads Manager, Canva, and AI-assisted product work.
 
         I am especially interested in outdoor, sport, fitness, wellness, and consumer brands where marketing work can actually strengthen community, customer engagement, and brand feel. I think I would be a strong junior-level fit for practical support across content, campaign execution, social, research, reporting, and day-to-day brand work.
 
@@ -6176,15 +6202,44 @@ def create_form_fill_task(conn: sqlite3.Connection, app_id: int) -> Path:
             "prep_rate_limit_minutes": prep_rate_limit_minutes_for_platform(detect_application_platform(str(job.get("url", "")), str(job.get("source", "")))),
         },
     }
+    initial_report = {
+        "created_at": started_at,
+        "started_at": started_at,
+        "task_created_at": started_at,
+        "platform": task["platform"],
+        "status": "queued",
+        "current_stage": "task-created",
+        "heartbeat_at": started_at,
+        "last_event_at": started_at,
+        "last_url": str(job.get("url", "")),
+        "visited_urls": [str(job.get("url", ""))] if str(job.get("url", "")) else [],
+        "login": {"status": "not-attempted"},
+        "blocker": {},
+        "scanned_fields": [],
+        "step_history": [],
+        "filled_fields": [],
+        "skipped_fields": [],
+        "review_fields": [],
+        "errors": [],
+        "events": [
+            {
+                "at": started_at,
+                "stage": "task-created",
+                "message": "Form preparation task created and queued for browser launch.",
+                "url": str(job.get("url", "")),
+            }
+        ],
+    }
+    report_path.write_text(json.dumps(initial_report, indent=2, ensure_ascii=True), encoding="utf-8")
     task_path = TASK_DIR / f"application-{app_id}-{dt.datetime.now().strftime('%Y%m%d%H%M%S')}.json"
     task_path.write_text(json.dumps(task, indent=2, ensure_ascii=True), encoding="utf-8")
     conn.execute(
         """
         update applications
-        set form_prep_report_path=?, form_prep_screenshot_path=?, form_prep_task_path=?, form_prep_started_at=?, updated_at=?
+        set form_prep_report_path=?, form_prep_screenshot_path=?, form_prep_task_path=?, updated_at=?
         where id=?
         """,
-        (str(report_path), str(screenshot_path), str(task_path), started_at, started_at, app_id),
+        (str(report_path), str(screenshot_path), str(task_path), started_at, app_id),
     )
     conn.commit()
     return task_path
@@ -6292,6 +6347,15 @@ def latest_form_fill_task_path(conn: sqlite3.Connection, app_id: int) -> Path:
     if not task_path.exists():
         raise RuntimeError("The saved form-prep task file no longer exists. Run Prepare form again.")
     return task_path
+
+
+def mark_form_fill_started(conn: sqlite3.Connection, app_id: int, started_at: str = "") -> None:
+    timestamp = started_at or now_iso()
+    conn.execute(
+        "update applications set form_prep_started_at=?, updated_at=? where id=?",
+        (timestamp, timestamp, app_id),
+    )
+    conn.commit()
 
 
 def launch_form_filler(task_path: Path) -> int:
@@ -6950,13 +7014,15 @@ class AppHandler(BaseHTTPRequestHandler):
                 app_id = int(data.get("id"))
                 with connect() as conn:
                     task_path = create_form_fill_task(conn, app_id)
-                pid = launch_form_filler(task_path)
+                    pid = launch_form_filler(task_path)
+                    mark_form_fill_started(conn, app_id)
                 self.json({"ok": True, "pid": pid, "task": str(task_path)})
             elif parsed.path == "/api/applications/resume-form":
                 app_id = int(data.get("id"))
                 with connect() as conn:
                     task_path = latest_form_fill_task_path(conn, app_id)
-                pid = launch_form_filler(task_path)
+                    pid = launch_form_filler(task_path)
+                    mark_form_fill_started(conn, app_id)
                 self.json({"ok": True, "pid": pid, "task": str(task_path)})
             elif parsed.path == "/api/applications/form-feedback":
                 with connect() as conn:
@@ -9742,15 +9808,19 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         <div class="notice ${report.errors?.length ? "bad" : ""}">
           Platform: ${escapeHtml(report.platform || "unknown")}<br>
           Status: ${escapeHtml(report.status || "unknown")}<br>
+          Stage: ${escapeHtml(report.current_stage || "unknown")}<br>
           Filled: ${filledCount} field(s)<br>
           Review: ${reviewCount} field(s)<br>
           Skipped: ${skippedCount} field(s)<br>
           Login: ${escapeHtml(login.status || "not attempted")}
+          ${report.heartbeat_at ? `<br>Last heartbeat: ${escapeHtml(report.heartbeat_at)}` : ""}
+          ${report.last_event_at ? `<br>Last event: ${escapeHtml(report.last_event_at)}` : ""}
           ${blocker.kind ? `<br>Waiting on you: ${escapeHtml(blocker.kind)}${blocker.message ? ` - ${escapeHtml(blocker.message)}` : ""}` : ""}
           ${blocker.blocked_until ? `<br>Cooldown until: ${escapeHtml(blocker.blocked_until)}` : ""}
           ${report.last_url ? `<br>Current page: ${escapeHtml(report.last_url)}` : ""}
           ${app.form_prep_screenshot_path ? `<br>Screenshot: ${escapeHtml(app.form_prep_screenshot_path)}` : ""}
         </div>
+        ${(report.events || []).length ? `<details><summary>Recent events</summary><pre>${escapeHtml((report.events || []).slice(-8).map(event => `[${event.at || ""}] ${event.stage || "event"} - ${event.message || ""}${event.url ? ` (${event.url})` : ""}`).join("\\n"))}</pre></details>` : ""}
         <details>
           <summary>Review-required fields</summary>
           ${prepList(report.review_fields, "No review-only fields saved.")}
