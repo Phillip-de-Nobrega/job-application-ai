@@ -114,21 +114,31 @@ MARKETING_KEYWORDS = {
     "community": 6,
     "growth": 6,
     "performance marketing": 7,
+    "digital marketing": 8,
     "seo": 5,
+    "sem": 5,
     "email marketing": 5,
     "crm": 5,
     "copywriting": 6,
+    "copy": 4,
     "partnership": 6,
     "influencer": 5,
+    "influencer marketing": 6,
+    "affiliate": 4,
+    "public relations": 5,
+    "pr ": 4,
     "events": 5,
     "analytics": 5,
     "google analytics": 5,
     "paid media": 6,
     "meta ads": 5,
+    "google ads": 5,
     "tiktok": 4,
     "instagram": 4,
     "creative": 5,
     "consumer": 4,
+    "storytelling": 4,
+    "b2c": 4,
 }
 
 PREFERRED_KEYWORDS = {
@@ -169,6 +179,7 @@ REMOTE_ALLOWED_LOCATION_TERMS = [
     "south africa",
     "cape town",
     "western cape",
+    "africa",
     "uk",
     "united kingdom",
     "england",
@@ -295,6 +306,11 @@ ENTRY_LEVEL_SIGNALS = [
     "executive",
     "creator",
     "ambassador",
+    "entry level",
+    "entry-level",
+    "learnership",
+    "trainee",
+    "placement",
 ]
 
 MARKETING_TITLE_SIGNALS = [
@@ -525,6 +541,54 @@ STARTER_JOB_SOURCES = [
         "source_type": "arbeitnow",
         "token": "public",
         "query": f"{GRADUATE_MARKETING_DISCOVERY_QUERY} marketing brand content social media community copywriter growth",
+    },
+    {
+        "name": "BizCommunity SA marketing jobs",
+        "source_type": "careers",
+        "token": "https://www.bizcommunity.com/Job/196/",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "CareerJunction Cape Town marketing",
+        "source_type": "careers",
+        "token": "https://www.careerjunction.co.za/jobs/marketing/cape-town",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "We Work Remotely marketing",
+        "source_type": "careers",
+        "token": "https://weworkremotely.com/remote-jobs/marketing",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Strava fitness app",
+        "source_type": "lever",
+        "token": "strava",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Gymshark fitness apparel",
+        "source_type": "careers",
+        "token": "https://www.gymshark.com/pages/careers",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Virgin Active SA",
+        "source_type": "careers",
+        "token": "https://www.virginactive.co.za/careers",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "HubSpot marketing platform",
+        "source_type": "greenhouse",
+        "token": "hubspot",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Decathlon SA sports retail",
+        "source_type": "careers",
+        "token": "https://www.decathlon.co.za/pages/careers",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
     },
 ]
 
@@ -953,6 +1017,8 @@ def init_db() -> None:
                 contact_email text not null default '',
                 source_url text not null default '',
                 company_notes text not null default '',
+                contact_search_notes text not null default '',
+                outreach_style text not null default 'intro',
                 status text not null default 'found',
                 outreach_email text not null default '',
                 next_follow_up text not null default '',
@@ -1099,6 +1165,9 @@ def init_db() -> None:
         conn.execute("update applications set queue_state='review' where queue_state=''")
         ensure_column(conn, "jobs", "reject_reason", "text not null default ''")
         ensure_column(conn, "jobs", "too_senior", "integer not null default 0")
+        ensure_column(conn, "company_leads", "contact_search_notes", "text not null default ''")
+        ensure_column(conn, "company_leads", "outreach_style", "text not null default 'intro'")
+        conn.execute("update company_leads set outreach_style='intro' where outreach_style=''")
         conn.execute(
             """
             update job_sources
@@ -1738,6 +1807,13 @@ def score_job(job: dict[str, Any]) -> tuple[int, str, str]:
     if int(job.get("too_senior") or 0):
         total -= 30
         concerns.append("Phillip marked this role as too senior for the current search.")
+    prior_reject = str(job.get("reject_reason") or "").lower()
+    if "not really marketing" in prior_reject:
+        total -= 40
+        concerns.append("Previously rejected as not really marketing; review before reconsidering.")
+    elif "wrong location" in prior_reject:
+        total -= 35
+        concerns.append("Previously rejected due to wrong location; confirm eligibility before reconsidering.")
     total = max(0, min(100, total))
     return total, "\n".join(reasons), "\n".join(concerns)
 
@@ -1993,14 +2069,13 @@ def discover_smartrecruiters(conn: sqlite3.Connection, company_identifier: str, 
         title = str(detail.get("name") or item.get("name") or "")
         if query and not should_keep_discovered_role(title, company_identifier, description, query, location):
             continue
-        job_url = (
-            detail.get("ref")
-            or detail.get("applyUrl")
-            or detail.get("postingUrl")
-            or item.get("ref")
-            or item.get("postingUrl")
-            or ""
-        )
+        apply_url = detail.get("applyUrl") or item.get("applyUrl") or ""
+        ref_url = detail.get("ref") or item.get("ref") or detail.get("postingUrl") or item.get("postingUrl") or ""
+        if not apply_url and ref_url:
+            sr_match = re.match(r"https?://(?:www\.)?smartrecruiters\.com/(.+)", ref_url)
+            if sr_match:
+                apply_url = f"https://jobs.smartrecruiters.com/{sr_match.group(1)}"
+        job_url = apply_url or ref_url
         ids.append(
             upsert_job(
                 conn,
@@ -3458,7 +3533,34 @@ def feedback_recommendations(feedback_rows: list[dict[str, Any]]) -> list[str]:
     return recs[:8]
 
 
+def _source_key_for_record(source: dict[str, Any]) -> str:
+    source_type = str(source.get("source_type", "")).lower()
+    token = str(source.get("token", ""))
+    if source_type in {"careers", "url"}:
+        return f"careers:{company_from_url(token)}"
+    return f"{source_type}:{token.lower()}"
+
+
 def source_cleanup_recommendations(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rejection_stats: dict[str, dict[str, int]] = {}
+    for row in conn.execute(
+        """
+        select source,
+          count(*) as total,
+          sum(case when reject_reason != '' then 1 else 0 end) as rejected,
+          sum(case when reject_reason = 'not really marketing' then 1 else 0 end) as not_marketing,
+          sum(case when reject_reason = 'wrong location' then 1 else 0 end) as wrong_location
+        from jobs
+        where source != '' and source != 'manual'
+        group by source
+        """
+    ).fetchall():
+        rejection_stats[str(row["source"])] = {
+            "total": int(row["total"] or 0),
+            "rejected": int(row["rejected"] or 0),
+            "not_marketing": int(row["not_marketing"] or 0),
+            "wrong_location": int(row["wrong_location"] or 0),
+        }
     rows = conn.execute("select * from job_sources order by enabled desc, updated_at desc").fetchall()
     recs: list[dict[str, Any]] = []
     for row in rows:
@@ -3480,6 +3582,29 @@ def source_cleanup_recommendations(conn: sqlite3.Connection) -> list[dict[str, A
                     action = "review-query"
             except Exception:
                 pass
+        if not reason:
+            key = _source_key_for_record(source)
+            stats = rejection_stats.get(key) or {}
+            total = stats.get("total", 0)
+            rejected = stats.get("rejected", 0)
+            not_marketing = stats.get("not_marketing", 0)
+            wrong_location = stats.get("wrong_location", 0)
+            if total >= 5 and rejected > 0:
+                rate = int(rejected * 100 / total)
+                if not_marketing >= 3 and rate >= 60:
+                    reason = (
+                        f"High rejection rate ({rate}% of {total} jobs): "
+                        f"{not_marketing} rejected as 'not really marketing'. "
+                        "Tighten the source query or pause this source."
+                    )
+                    action = "review-query"
+                elif wrong_location >= 2 and rate >= 60:
+                    reason = (
+                        f"High rejection rate ({rate}% of {total} jobs): "
+                        f"{wrong_location} rejected as 'wrong location'. "
+                        "This source may not produce Cape Town/remote-eligible roles."
+                    )
+                    action = "review-query"
         if reason:
             recs.append(
                 {
@@ -4741,7 +4866,7 @@ def compose_follow_up(profile: dict[str, str], job: dict[str, Any], application:
     ).strip(), "follow_up")
 
 
-def compose_cold_outreach(profile: dict[str, str], company: str, contact_name: str = "", company_notes: str = "") -> str:
+def compose_cold_outreach(profile: dict[str, str], company: str, contact_name: str = "", company_notes: str = "", style: str = "intro") -> str:
     sender_name = profile.get("full_name", "Phillip de Nobrega")
     greeting = f"Hi {contact_name}," if contact_name else f"Hi {company} team,"
     reason = normalize_space(company_notes).rstrip(".")
@@ -4749,6 +4874,29 @@ def compose_cold_outreach(profile: dict[str, str], company: str, contact_name: s
         brand_line = f"What stands out to me is {reason}."
     else:
         brand_line = "What stands out to me is the way the brand connects with its audience."
+    style_key = normalize_space(style).lower() or "intro"
+    if style_key == "proposal":
+        return phillip_voice_text(textwrap.dedent(
+            f"""
+            {greeting}
+
+            I wanted to send a slightly more direct note because {company} is exactly the kind of brand I would be excited to work with. {brand_line}
+
+            I am a UCT Business Science Marketing graduate with hands-on experience across content creation, market research, brand thinking, Google Analytics, Meta Ads Manager, Canva, and AI-assisted product work. I am still early-career, but I think I could add value quickly in the kind of practical marketing work that often needs consistent support rather than inflated senior claims.
+
+            The main areas where I think I could help are:
+            - content planning and day-to-day social support
+            - brand and audience research
+            - campaign execution support
+            - reporting, analytics, and marketing admin
+            - community, partnerships, and general junior marketing support
+
+            If there is any space for a junior marketer, a short trial, or project-based support, I would really value the chance to introduce myself properly and show how I could contribute.
+
+            Kind regards,
+            {sender_name}
+            """
+        ).strip(), "outreach")
     return phillip_voice_text(textwrap.dedent(
         f"""
         {greeting}
@@ -4771,7 +4919,8 @@ def compose_lead_outreach(profile: dict[str, str], lead: dict[str, Any]) -> str:
     contact_role = normalize_space(str(lead.get("contact_role", "")))
     company_notes = normalize_space(str(lead.get("company_notes", "")))
     industry = normalize_space(str(lead.get("industry", "")))
-    body = compose_cold_outreach(profile, company, contact_name, company_notes)
+    style = normalize_space(str(lead.get("outreach_style", ""))) or "intro"
+    body = compose_cold_outreach(profile, company, contact_name, company_notes, style)
     if contact_role:
         body = body.replace(
             "I wanted to reach out because",
@@ -4792,6 +4941,128 @@ def lead_subject(lead: dict[str, Any]) -> str:
     return f"Quick introduction - marketing support for {company}"
 
 
+def outreach_documents_folder(lead: dict[str, Any]) -> Path:
+    return DOCS_DIR / f"outreach-{safe_filename(str(lead.get('company', 'company')))}-{lead.get('id') or 'draft'}"
+
+
+def render_outreach_proposal_text(profile: dict[str, str], lead: dict[str, Any]) -> str:
+    company = normalize_space(str(lead.get("company", ""))) or "the company"
+    industry = normalize_space(str(lead.get("industry", ""))) or "consumer"
+    brand_fit = normalize_space(str(lead.get("company_notes", ""))) or "a strong brand fit and real overlap with Phillip's interests."
+    sender_name = normalize_space(str(profile.get("full_name", ""))) or "Phillip de Nobrega"
+    return "\n".join([
+        f"Outreach Proposal - {company}",
+        "",
+        f"Prepared for: {company}",
+        f"Prepared by: {sender_name}",
+        f"Category: {industry}",
+        "",
+        "Why this brand stands out",
+        brand_fit,
+        "",
+        "What Phillip could help with",
+        "- Content planning and social support",
+        "- Brand and audience research",
+        "- Campaign execution support",
+        "- Reporting, analytics, and day-to-day marketing admin",
+        "- Junior-level support across community, partnerships, and digital work",
+        "",
+        "Working style",
+        "Phillip is looking for an early-career marketing role and is open to a junior position, a short trial period, or project-based support where it makes sense.",
+        "",
+        "Contact approach",
+        "Use the outreach email as the main first-touch message. Keep the tone warm, specific, and personal.",
+    ]).strip()
+
+
+def render_outreach_proposal_rtf(profile: dict[str, str], lead: dict[str, Any]) -> str:
+    body = render_outreach_proposal_text(profile, lead)
+    return (
+        "{\\rtf1\\ansi\\deff0\n"
+        "{\\fonttbl{\\f0 Arial;}}\n"
+        "\\fs24\n"
+        f"{rtf_escape(body)}\n"
+        "}\n"
+    )
+
+
+def outreach_readiness(lead: dict[str, Any]) -> dict[str, Any]:
+    issues: list[str] = []
+    if not normalize_space(str(lead.get("company", ""))):
+        issues.append("missing company")
+    if not normalize_space(str(lead.get("website", ""))):
+        issues.append("missing website")
+    if not normalize_space(str(lead.get("company_notes", ""))):
+        issues.append("missing brand-fit notes")
+    if not normalize_space(str(lead.get("outreach_email", ""))):
+        issues.append("missing draft email")
+    if not normalize_space(str(lead.get("contact_email", ""))):
+        issues.append("missing contact email")
+    return {
+        "ready_to_send": not issues,
+        "needs_contact": "missing contact email" in issues,
+        "needs_notes": "missing brand-fit notes" in issues,
+        "needs_draft": "missing draft email" in issues,
+        "issues": issues,
+    }
+
+
+def lead_contact_search_links(lead: dict[str, Any]) -> dict[str, str]:
+    company = normalize_space(str(lead.get("company", "")))
+    website = normalize_space(str(lead.get("website", "")))
+    query = urllib.parse.quote(f"{company} founder owner marketing contact email linkedin")
+    links = {
+        "Google contact search": f"https://www.google.com/search?q={query}" if company else "",
+        "LinkedIn people search": f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote(company)}" if company else "",
+        "Company website": website,
+    }
+    if website:
+        host = normalize_domain(website)
+        if host:
+            links["Google site search"] = f"https://www.google.com/search?q={urllib.parse.quote(company)}+site%3A{urllib.parse.quote(host)}"
+    return {label: url for label, url in links.items() if url}
+
+
+def write_outreach_documents(profile: dict[str, str], lead: dict[str, Any]) -> None:
+    folder = outreach_documents_folder(lead)
+    folder.mkdir(parents=True, exist_ok=True)
+    email_body = normalize_space(str(lead.get("outreach_email", "")))
+    if not email_body:
+        email_body = compose_lead_outreach(profile, lead)
+    parts = {
+        "outreach-email.txt": email_body,
+        "brand-fit-notes.txt": str(lead.get("company_notes", "") or "").strip(),
+        "proposal-summary.txt": render_outreach_proposal_text(profile, lead),
+        "contact-details.txt": "\n".join([
+            f"Company: {lead.get('company', '')}",
+            f"Website: {lead.get('website', '')}",
+            f"Contact name: {lead.get('contact_name', '')}",
+            f"Contact role: {lead.get('contact_role', '')}",
+            f"Contact email: {lead.get('contact_email', '')}",
+            f"Source URL: {lead.get('source_url', '')}",
+        ]).strip(),
+    }
+    for filename, body in parts.items():
+        (folder / filename).write_text(body + ("\n" if body and not body.endswith("\n") else ""), encoding="utf-8")
+    (folder / "proposal-summary.rtf").write_text(render_outreach_proposal_rtf(profile, lead), encoding="utf-8")
+
+
+def build_outreach_artifacts(lead: dict[str, Any]) -> dict[str, str]:
+    folder = outreach_documents_folder(lead)
+    artifact_files = {
+        "outreach_email": folder / "outreach-email.txt",
+        "brand_fit_notes": folder / "brand-fit-notes.txt",
+        "proposal_summary": folder / "proposal-summary.txt",
+        "proposal_rtf": folder / "proposal-summary.rtf",
+        "contact_details": folder / "contact-details.txt",
+    }
+    artifacts: dict[str, str] = {}
+    for key, artifact_path in artifact_files.items():
+        if artifact_path.exists():
+            artifacts[key] = str(artifact_path)
+    return artifacts
+
+
 def save_company_lead(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
     fields = [
         "company",
@@ -4802,12 +5073,15 @@ def save_company_lead(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
         "contact_email",
         "source_url",
         "company_notes",
+        "contact_search_notes",
+        "outreach_style",
         "status",
         "outreach_email",
         "next_follow_up",
     ]
     values = {field: normalize_space(str(data.get(field, ""))) for field in fields}
     values["status"] = values["status"] or "found"
+    values["outreach_style"] = values["outreach_style"] or "intro"
     lead_id = int(data.get("id") or 0)
     timestamp = now_iso()
     if lead_id:
@@ -5500,6 +5774,8 @@ def target_company_to_lead(conn: sqlite3.Connection, target_id: int) -> dict[str
         "industry": target.get("industry", ""),
         "source_url": target.get("website") or target.get("careers_url") or "",
         "company_notes": notes,
+        "contact_search_notes": "Start with founder/owner/marketing lead search, then confirm the best public work email before sending.",
+        "outreach_style": "intro",
         "status": "found",
     }
     lead_id = save_company_lead(conn, payload)
@@ -6358,6 +6634,20 @@ def mark_form_fill_started(conn: sqlite3.Connection, app_id: int, started_at: st
     conn.commit()
 
 
+def _find_node() -> str:
+    node_path = shutil.which("node")
+    if node_path:
+        return node_path
+    for candidate in [
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+    ]:
+        if os.path.isfile(candidate):
+            return candidate
+    raise RuntimeError("Node.js not found. Install it via Homebrew: brew install node")
+
+
 def launch_form_filler(task_path: Path) -> int:
     script = ROOT / "scripts" / "form_filler.js"
     if not script.exists():
@@ -6365,11 +6655,12 @@ def launch_form_filler(task_path: Path) -> int:
     node_modules = ROOT / "node_modules" / "playwright"
     if not node_modules.exists():
         raise RuntimeError("Playwright is not installed yet. Run npm install first.")
+    node = _find_node()
     log_base = LOG_DIR / f"form-fill-{task_path.stem}"
     stdout = (log_base.with_suffix(".out.log")).open("a", encoding="utf-8")
     stderr = (log_base.with_suffix(".err.log")).open("a", encoding="utf-8")
     process = subprocess.Popen(
-        ["node", str(script), "--task", str(task_path)],
+        [node, str(script), "--task", str(task_path)],
         cwd=str(ROOT),
         stdout=stdout,
         stderr=stderr,
@@ -7172,6 +7463,9 @@ class AppHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/leads/save":
                 with connect() as conn:
                     lead_id = save_company_lead(conn, data)
+                    profile = get_profile(conn)
+                    lead = row_to_dict(conn.execute("select * from company_leads where id=?", (lead_id,)).fetchone()) or {}
+                    write_outreach_documents(profile, lead)
                 self.json({"ok": True, "id": lead_id})
             elif parsed.path == "/api/leads/generate":
                 lead_id = int(data.get("id"))
@@ -7181,7 +7475,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     if not lead:
                         raise RuntimeError("Company lead not found")
                     updates = {}
-                    for field in ["company", "industry", "contact_name", "contact_role", "contact_email", "company_notes", "website", "source_url"]:
+                    for field in ["company", "industry", "contact_name", "contact_role", "contact_email", "company_notes", "contact_search_notes", "outreach_style", "website", "source_url"]:
                         if field in data:
                             updates[field] = normalize_space(str(data.get(field, "")))
                             lead[field] = updates[field]
@@ -7191,7 +7485,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         """
                         update company_leads
                         set company=?, website=?, industry=?, contact_name=?, contact_role=?,
-                            contact_email=?, source_url=?, company_notes=?, outreach_email=?,
+                            contact_email=?, source_url=?, company_notes=?, contact_search_notes=?, outreach_style=?, outreach_email=?,
                             status='drafted', updated_at=?
                         where id=?
                         """,
@@ -7204,12 +7498,16 @@ class AppHandler(BaseHTTPRequestHandler):
                             lead.get("contact_email", ""),
                             lead.get("source_url", ""),
                             lead.get("company_notes", ""),
+                            lead.get("contact_search_notes", ""),
+                            lead.get("outreach_style", "") or "intro",
                             outreach,
                             timestamp,
                             lead_id,
                         ),
                     )
                     conn.commit()
+                    refreshed = row_to_dict(conn.execute("select * from company_leads where id=?", (lead_id,)).fetchone()) or {}
+                    write_outreach_documents(profile, refreshed)
                 self.json({"ok": True, "outreach_email": outreach})
             elif parsed.path == "/api/leads/humanize":
                 lead_id = int(data.get("id"))
@@ -7224,6 +7522,8 @@ class AppHandler(BaseHTTPRequestHandler):
                         (outreach, timestamp, lead_id),
                     )
                     conn.commit()
+                    refreshed = row_to_dict(conn.execute("select * from company_leads where id=?", (lead_id,)).fetchone()) or {}
+                    write_outreach_documents(get_profile(conn), refreshed)
                     check = voice_check(outreach)
                 self.json({"ok": True, "outreach_email": outreach, "check": check})
             elif parsed.path == "/api/leads/status":
@@ -7267,6 +7567,8 @@ class AppHandler(BaseHTTPRequestHandler):
                         (to_address, body, timestamp, next_follow_up, timestamp, lead_id),
                     )
                     conn.commit()
+                    refreshed = row_to_dict(conn.execute("select * from company_leads where id=?", (lead_id,)).fetchone()) or {}
+                    write_outreach_documents(profile, refreshed)
                 self.json({"ok": True})
             elif parsed.path == "/api/targets/save":
                 with connect() as conn:
@@ -7366,6 +7668,12 @@ def get_state() -> dict[str, Any]:
             row_to_dict(row)
             for row in conn.execute("select * from company_leads order by updated_at desc, created_at desc").fetchall()
         ]
+        for lead in leads:
+            lead["subject_preview"] = lead_subject(lead)
+            lead["readiness"] = outreach_readiness(lead)
+            lead["contact_search_links"] = lead_contact_search_links(lead)
+            lead["documents_folder"] = str(outreach_documents_folder(lead))
+            lead["document_artifacts"] = build_outreach_artifacts(lead)
         sources = [
             row_to_dict(row)
             for row in conn.execute("select * from job_sources order by enabled desc, updated_at desc").fetchall()
@@ -8210,8 +8518,14 @@ INDEX_HTML = r"""<!doctype html>
               <div><label>Contact name</label><input id="lead_contact_name"></div>
               <div><label>Contact role</label><input id="lead_contact_role"></div>
             </div>
+            <label>Outreach style</label>
+            <select id="lead_outreach_style">
+              <option value="intro">Short intro email</option>
+              <option value="proposal">Proposal-style email</option>
+            </select>
             <label>Contact email</label><input id="lead_contact_email" placeholder="founder@company.com or owner@company.com">
             <label>Why this brand fits / why you fit</label><textarea id="lead_company_notes" placeholder="What you genuinely like about the brand, what stands out, how your background lines up, and what kind of support you could offer."></textarea>
+            <label>Contact-finding notes</label><textarea id="lead_contact_search_notes" placeholder="Who to look for, where to search, and any public contact paths you want to try."></textarea>
             <div class="actions">
               <button class="btn primary" onclick="saveLead()">Save lead</button>
               <button class="btn" onclick="showTab('targets')">Use a target company instead</button>
@@ -8486,7 +8800,8 @@ Record:
     function message(text, type = "ok") {
       const el = document.getElementById("message");
       el.innerHTML = `<div class="notice ${type === "bad" ? "bad" : ""}">${escapeHtml(text)}</div>`;
-      setTimeout(() => { el.innerHTML = ""; }, 5000);
+      el.scrollIntoView({behavior: "smooth", block: "nearest"});
+      setTimeout(() => { el.innerHTML = ""; }, type === "bad" ? 10000 : 5000);
     }
 
     function renderProfile() {
@@ -8984,13 +9299,13 @@ Record:
       const missing = missingApplicationItems(app);
       const requiredDraftMissing = !app.cover_letter || !app.answers || !app.follow_up;
       if (isBoardPrepBlockedApp(app)) {
-        return "This role needs the real apply link before it can be prepared here.";
+        return "Open the draft, find the company's direct job or apply URL, paste it into the Job URL field, and save — then Prepare form will work.";
       }
       if (app.status === "submitted" && app.next_follow_up && !app.follow_up_sent_at && daysUntil(app.next_follow_up) <= 0) {
         return "Send due follow-up.";
       }
       if (requiredDraftMissing) return "Regenerate or complete the draft.";
-      if (!app.company_notes) return "Add company-specific notes before using the email drafts.";
+      if (!app.company_notes) return "Open the draft and fill in the Company notes field (what stands out about this company/role), then regenerate the cover letter.";
       if (!app.contact_email) return "Look for a recruiter/contact email, or proceed through the ATS only.";
       if (app.status === "ready") return "Run Prepare form and review the browser fields.";
       if (missing.length) return "Review missing details, then prepare the form.";
@@ -9029,8 +9344,8 @@ Record:
             ${concerns ? `<details><summary>Fit concerns</summary><pre>${escapeHtml(concerns)}</pre></details>` : ""}
             <div class="actions">
               <button class="btn primary" onclick="selectApplication(${app.id})">Review draft</button>
-              ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">Open job</a>` : ""}
-              <button class="btn" onclick="prepareApplicationFromDashboard(${app.id})">Prepare form</button>
+              ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">${isBoardPrepBlockedApp(app) ? "Find apply URL" : "Open job"}</a>` : ""}
+              ${!isBoardPrepBlockedApp(app) ? `<button class="btn" onclick="prepareApplicationFromDashboard(${app.id})">Prepare form</button>` : ""}
               <button class="btn warn" onclick="markApplicationSubmittedFromDashboard(${app.id})">Mark submitted</button>
             </div>
           </div>
@@ -9638,7 +9953,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
             ${app.form_prep_started_at ? `<span class="tag">form prep ${escapeHtml(app.form_prep_report?.status || "started")}</span>` : ""}
             ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
           </div>
-          ${isBoardPrepBlockedApp(app) ? `<p class="muted">This one still needs the real apply link.</p>` : ""}
+          ${isBoardPrepBlockedApp(app) ? `<p class="muted">Needs a direct company/apply URL — open the draft, update the Job URL field, then form prep will work.</p>` : ""}
           <div class="actions">
             <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
             <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
@@ -9848,6 +10163,12 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <h3>${escapeHtml(lead.company || "Unnamed company")}</h3>
           <div class="meta">${escapeHtml(lead.industry || "No industry")} - ${escapeHtml(lead.status)}</div>
           <div class="meta">${escapeHtml(lead.contact_email ? contactLeadSummary(lead) : "No contact email saved")}</div>
+          <div>
+            ${lead.readiness?.ready_to_send ? `<span class="tag">ready to send</span>` : ""}
+            ${lead.readiness?.needs_contact ? `<span class="tag">contact needed</span>` : ""}
+            ${lead.readiness?.needs_notes ? `<span class="tag">notes needed</span>` : ""}
+            ${lead.readiness?.needs_draft ? `<span class="tag">draft needed</span>` : ""}
+          </div>
           ${lead.website ? `<p class="meta"><a href="${escapeAttr(lead.website)}" target="_blank" rel="noreferrer">${escapeHtml(lead.website)}</a></p>` : ""}
           <div class="actions">
             <button class="btn primary" onclick="selectLead(${lead.id})">Edit</button>
@@ -9927,8 +10248,15 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       if (!selectedLead) return;
       const lead = selectedLead;
       const subject = outreachSubjectPreview(lead);
+      const readiness = lead.readiness || {};
+      const artifacts = lead.document_artifacts || {};
+      const searchLinks = lead.contact_search_links || {};
       document.getElementById("leadEditor").innerHTML = `
         <h3>${escapeHtml(lead.company || "Company lead")}</h3>
+        <div class="notice ${readiness.ready_to_send ? "" : "bad"}">
+          ${readiness.ready_to_send ? "This lead is ready for a manual send review." : "This lead still needs a few things before it is send-ready."}
+          ${readiness.issues?.length ? `<br>${escapeHtml(readiness.issues.join(" | "))}` : ""}
+        </div>
         <div class="row">
           <div><label>Company</label><input id="edit_lead_company" value="${escapeAttr(lead.company || "")}"></div>
           <div><label>Website</label><input id="edit_lead_website" value="${escapeAttr(lead.website || "")}"></div>
@@ -9941,11 +10269,26 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <div><label>Contact name</label><input id="edit_lead_contact_name" value="${escapeAttr(lead.contact_name || "")}"></div>
           <div><label>Contact role</label><input id="edit_lead_contact_role" value="${escapeAttr(lead.contact_role || "")}"></div>
         </div>
+        <label>Outreach style</label>
+        <select id="edit_lead_outreach_style">
+          <option value="intro" ${String(lead.outreach_style || "intro") === "intro" ? "selected" : ""}>Short intro email</option>
+          <option value="proposal" ${String(lead.outreach_style || "") === "proposal" ? "selected" : ""}>Proposal-style email</option>
+        </select>
         <label>Contact email</label><input id="edit_lead_contact_email" value="${escapeAttr(lead.contact_email || "")}">
         <label>Source URL</label><input id="edit_lead_source_url" value="${escapeAttr(lead.source_url || "")}">
         <label>Why this brand fits / why you fit</label><textarea id="edit_lead_company_notes">${escapeHtml(lead.company_notes || "")}</textarea>
+        <label>Contact-finding notes</label><textarea id="edit_lead_contact_search_notes">${escapeHtml(lead.contact_search_notes || "")}</textarea>
+        <details>
+          <summary>Contact search links</summary>
+          ${Object.entries(searchLinks).map(([label, url]) => `<div class="meta"><a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a></div>`).join("") || `<p class="muted">No contact-search links yet.</p>`}
+        </details>
         <label>Subject line preview</label><input id="edit_lead_subject" value="${escapeAttr(subject)}" readonly>
         <label>Draft email</label><textarea id="edit_lead_outreach_email" style="min-height:280px">${escapeHtml(lead.outreach_email || "")}</textarea>
+        <details>
+          <summary>Outreach pack</summary>
+          <p class="muted">${escapeHtml(lead.documents_folder || "")}</p>
+          <pre>${escapeHtml(Object.entries(artifacts).map(([key, value]) => `${key}: ${value}`).join("\n") || "No outreach files generated yet.")}</pre>
+        </details>
         <div class="actions">
           <button class="btn primary" onclick="saveLeadEdit()">Save lead</button>
           <button class="btn" onclick="generateLeadEmail()">Build outreach email</button>
@@ -10036,7 +10379,13 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         <p class="muted">Generated files are written into the local documents folder after saving.</p>
       `;
       if (!document.getElementById("credential_id").value) clearSiteCredentialForm();
-      if (switchTab) showTab("applications");
+      if (switchTab) {
+        showTab("applications");
+        setTimeout(() => {
+          const editor = document.getElementById("applicationEditor");
+          if (editor) editor.scrollIntoView({behavior: "smooth", block: "start"});
+        }, 50);
+      }
     }
 
     function contactSummary(app) {
@@ -10414,6 +10763,8 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         contact_email: document.getElementById(`${prefix}_contact_email`).value,
         source_url: document.getElementById(`${prefix}_source_url`).value,
         company_notes: document.getElementById(`${prefix}_company_notes`).value,
+        contact_search_notes: document.getElementById(`${prefix}_contact_search_notes`)?.value || "",
+        outreach_style: document.getElementById(`${prefix}_outreach_style`)?.value || "intro",
         status: document.getElementById(`${prefix}_status`)?.value || "found",
         outreach_email: document.getElementById(`${prefix}_outreach_email`)?.value || ""
       };
@@ -10425,6 +10776,8 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       ["company", "website", "industry", "source_url", "contact_name", "contact_role", "contact_email", "company_notes"].forEach(key => {
         document.getElementById(`lead_${key}`).value = "";
       });
+      document.getElementById("lead_contact_search_notes").value = "";
+      document.getElementById("lead_outreach_style").value = "intro";
       message("Outreach lead saved.");
       await load();
       showTab("outreach");
@@ -10805,6 +11158,10 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
 
     async function prepareApplicationFromDashboard(id) {
       selectApplication(id, false);
+      if (isBoardPrepBlockedApp(selectedApplication)) {
+        message("This draft still points to a job board listing page — Prepare form can't run on it. Open the listing, find the company's direct apply URL, then update it in the draft editor.", "bad");
+        return;
+      }
       await prepareApplicationForm();
       showTab("applications");
     }

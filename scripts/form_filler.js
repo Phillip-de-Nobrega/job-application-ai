@@ -406,6 +406,27 @@ async function clickApplyIfPresent(page, report, platform) {
       report.errors.push(`Ashby direct application fallback failed: ${error.message}`);
     }
   }
+  if (platform === "smartrecruiters") {
+    const srSelectors = [
+      '[data-js="job-cta-button"]',
+      'a[href*="jobs.smartrecruiters.com"]',
+      'button[data-action="apply" i]',
+    ];
+    for (const selector of srSelectors) {
+      try {
+        const locator = page.locator(selector).first();
+        if (await locator.count()) {
+          page = await clickAndFollow(page, locator, report);
+          report.clicked_apply = true;
+          pushUnique(report.visited_urls, page.url());
+          console.log("clicked SmartRecruiters apply button via fallback selector");
+          return page;
+        }
+      } catch (error) {
+        // Continue.
+      }
+    }
+  }
   return page;
 }
 
