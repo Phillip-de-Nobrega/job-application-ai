@@ -9595,9 +9595,8 @@ Record:
     }
 
     function dailyReviewApplications() {
-      const actionable = state.applications.filter(app => ["draft", "ready"].includes(app.status));
-      if (actionable.length) return actionable.slice(0, 5);
-      return state.applications.filter(app => app.status !== "rejected").slice(0, 5);
+      const DONE = new Set(["rejected", "submitted", "interview", "offer"]);
+      return state.applications.filter(app => !DONE.has(app.status)).slice(0, 5);
     }
 
     function appJob(app) {
