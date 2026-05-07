@@ -1801,15 +1801,6 @@ async function attemptSignupIfNeeded(page, task, report) {
 
   report.login = { status: "signup-detected", login_url: url };
 
-  if (!password) {
-    report.login.status = "signup-needs-password";
-    record(report.review_fields, {
-      prompt: "Account signup",
-      reason: `This page wants you to create an account. Save a password for this site in My Profile → Site Credentials, then try again and the form will be filled automatically.`
-    });
-    return false;
-  }
-
   const email = credential.username || profile.email || "";
   const name = splitName(profile.full_name);
 
@@ -1822,17 +1813,21 @@ async function attemptSignupIfNeeded(page, task, report) {
   await fillByLabels(page, [/email/i], email, "signup email", report);
   await fillBySelectors(page, ['input[type="email"]', 'input[name*="email" i]', 'input[id*="email" i]'], email, "signup email selector", report);
 
-  // Fill password fields
+  // Fill password fields — use saved credential if available, otherwise leave for manual entry
   const passwordFields = page.locator('input[type="password"]');
   const passwordCount = await passwordFields.count().catch(() => 0);
-  for (let i = 0; i < passwordCount; i++) {
-    try {
-      const field = passwordFields.nth(i);
-      if (await isVisible(field)) {
-        await field.fill(password, { timeout: 5000 });
-        record(report.filled_fields, { prompt: i === 0 ? "signup password" : "signup confirm password", value: "[saved in Keychain]", kind: "login" });
-      }
-    } catch (e) {}
+  if (password) {
+    for (let i = 0; i < passwordCount; i++) {
+      try {
+        const field = passwordFields.nth(i);
+        if (await isVisible(field)) {
+          await field.fill(password, { timeout: 5000 });
+          record(report.filled_fields, { prompt: i === 0 ? "signup password" : "signup confirm password", value: "[saved in Keychain]", kind: "login" });
+        }
+      } catch (e) {}
+    }
+  } else if (passwordCount > 0) {
+    record(report.review_fields, { prompt: "Password", reason: "Type your chosen password here, then click Create Account yourself." });
   }
 
   // Tick terms/privacy checkboxes — flagged for review

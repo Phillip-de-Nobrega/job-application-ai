@@ -531,12 +531,6 @@ STARTER_JOB_SOURCES = [
         "query": f"{GRADUATE_MARKETING_DISCOVERY_QUERY} growth campaign performance marketing",
     },
     {
-        "name": "Remote OK marketing",
-        "source_type": "remoteok",
-        "token": "marketing",
-        "query": f"{GRADUATE_MARKETING_DISCOVERY_QUERY} marketing brand content social media community copywriter",
-    },
-    {
         "name": "Arbeitnow Europe remote marketing",
         "source_type": "arbeitnow",
         "token": "public",
@@ -1822,7 +1816,9 @@ def graduate_query_terms(query: str = "") -> list[str]:
     return query_terms_from_text(query or GRADUATE_MARKETING_DISCOVERY_QUERY, GRADUATE_MARKETING_DISCOVERY_QUERY)
 
 
-def should_keep_discovered_role(title: str, company: str, description: str, query: str = "", location: str = "") -> bool:
+def should_keep_discovered_role(title: str, company: str, description: str, query: str = "", location: str = "", url: str = "") -> bool:
+    if url and is_paywalled_or_gated_source(url):
+        return False
     lower_title = normalize_space(title).lower()
     lower_description = normalize_space(description).lower()
     lower_location = normalize_space(location).lower()
@@ -2510,7 +2506,7 @@ def run_job_source(conn: sqlite3.Connection, source: dict[str, Any]) -> dict[str
     elif source_type == "remotive":
         result = discover_remotive(conn, token or "marketing", query)
     elif source_type == "remoteok":
-        result = discover_remoteok(conn, token, query)
+        raise RuntimeError("RemoteOK is disabled — jobs there require account signup before applying.")
     elif source_type == "arbeitnow":
         result = discover_arbeitnow(conn, token, query)
     elif source_type == "workable":
@@ -4679,14 +4675,39 @@ def is_job_board_url(url: str) -> bool:
     return any(term in lower for term in blocked)
 
 
+# Platforms that require paid membership, forced account creation before viewing
+# the application, or CAPTCHA-gated signups — jobs from these are filtered out.
+BLOCKED_JOB_PLATFORMS = [
+    "remoteok.com",
+    "indeed.com",
+    "indeed.co.za",
+    "linkedin.com",
+    "ziprecruiter.com",
+    "monster.com",
+    "careerbuilder.com",
+    "glassdoor.com",
+    "simplyhired.com",
+    "jobvite.com/apply-redirect",
+    "jobs.com",
+]
+
+
 def is_board_prep_blocked_url(url: str) -> bool:
     lower = normalize_space(url).lower()
     if not lower:
         return False
-    # RemoteOK listing pages currently gate external applies behind signup/CAPTCHA,
-    # which makes them poor targets for supervised form preparation.
-    if "remoteok.com/remote-jobs/" in lower:
-        return True
+    for platform in BLOCKED_JOB_PLATFORMS:
+        if platform in lower:
+            return True
+    return False
+
+
+def is_paywalled_or_gated_source(url: str) -> bool:
+    """Returns True for job board URLs that require signup/payment to apply."""
+    lower = normalize_space(url).lower()
+    for platform in BLOCKED_JOB_PLATFORMS:
+        if platform in lower:
+            return True
     return False
 
 
