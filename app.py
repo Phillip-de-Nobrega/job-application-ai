@@ -7782,76 +7782,117 @@ INDEX_HTML = r"""<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Job Application AI</title>
   <style>
+    /* UI UX Pro Max — Swiss Modernism 2.0 + Job Board/Recruitment palette */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     :root {
       color-scheme: light;
-      --ink: #15202b;
-      --muted: #5b6775;
-      --line: #d7dde5;
-      --soft: #f4f7f9;
-      --panel: #ffffff;
-      --accent: #087f8c;
-      --accent-2: #b35c00;
-      --danger: #a52828;
-      --good: #1f7a45;
+      /* Primary palette — professional blue */
+      --ink:      #0C4A6E;
+      --muted:    #64748B;
+      --line:     #BAE6FD;
+      --soft:     #F0F9FF;
+      --panel:    #FFFFFF;
+      --accent:   #0369A1;
+      --accent-2: #D97706;
+      --danger:   #DC2626;
+      --good:     #16A34A;
+      /* Extended */
+      --accent-hover:  #0284C7;
+      --accent-light:  #E0F2FE;
+      --accent-2-bg:   #FFFBEB;
+      --danger-bg:     #FEF2F2;
+      --good-bg:       #F0FDF4;
+      /* Spacing — 8px base unit */
+      --sp-1: 8px;
+      --sp-2: 16px;
+      --sp-3: 24px;
+      --radius: 8px;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
       color: var(--ink);
-      background: #eef3f4;
-      line-height: 1.4;
+      background: var(--soft);
+      line-height: 1.5;
     }
     header {
       position: sticky;
       top: 0;
       z-index: 5;
-      background: #ffffff;
+      background: var(--panel);
       border-bottom: 1px solid var(--line);
+      box-shadow: 0 1px 4px rgba(3,105,161,0.06);
     }
     .topbar {
       max-width: 1320px;
       margin: 0 auto;
-      padding: 16px 20px;
+      padding: 12px 20px;
       display: grid;
-      gap: 16px;
+      gap: 12px;
     }
     .nav-stack {
       display: grid;
       gap: 8px;
       justify-items: start;
     }
-    h1 { margin: 0; font-size: 22px; }
-    .sub { color: var(--muted); font-size: 13px; }
-    nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; color: var(--accent); }
+    .sub { color: var(--muted); font-size: 12px; }
+    nav { display: flex; gap: 6px; flex-wrap: wrap; }
     .nav-secondary { display: none; }
     .nav-secondary.open { display: flex; }
     nav button, .btn {
       border: 1px solid var(--line);
-      background: #fff;
+      background: var(--panel);
       color: var(--ink);
-      padding: 9px 12px;
-      border-radius: 6px;
+      padding: 7px 14px;
+      border-radius: var(--radius);
       cursor: pointer;
       font: inherit;
-      min-height: 38px;
+      font-size: 13px;
+      font-weight: 500;
+      min-height: 36px;
+      transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
+    }
+    nav button:hover, .btn:hover {
+      background: var(--accent-light);
+      border-color: var(--accent);
+      color: var(--accent);
     }
     nav button.active, .btn.primary {
       background: var(--accent);
       border-color: var(--accent);
-      color: white;
+      color: #fff;
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(3,105,161,0.25);
+    }
+    nav button.active:hover, .btn.primary:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+      color: #fff;
     }
     nav button.ghost-active {
       border-color: var(--accent);
       color: var(--accent);
-      background: #fff;
+      background: var(--accent-light);
+      font-weight: 600;
     }
-    .btn.warn { background: var(--accent-2); border-color: var(--accent-2); color: white; }
+    .btn.warn {
+      background: var(--accent-2);
+      border-color: var(--accent-2);
+      color: #fff;
+      font-weight: 600;
+    }
+    .btn.warn:hover { background: #B45309; border-color: #B45309; color: #fff; }
+    .btn:disabled, .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
     main {
       max-width: 1320px;
       margin: 0 auto;
       padding: 20px;
     }
+    /* Nav padding offset for sticky header (UX Pro Max: sticky-nav rule) */
+    main { padding-top: var(--sp-3); }
     section { display: none; }
     section.active { display: block; }
     .grid {
@@ -7863,63 +7904,79 @@ INDEX_HTML = r"""<!doctype html>
     .panel {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: var(--radius);
       padding: 16px;
+      box-shadow: 0 1px 3px rgba(3,105,161,0.05);
     }
     .panel + .panel { margin-top: 16px; }
-    h2 { margin: 0 0 12px; font-size: 18px; }
-    h3 { margin: 0 0 8px; font-size: 15px; }
+    h2 { margin: 0 0 12px; font-size: 17px; font-weight: 700; letter-spacing: -0.2px; }
+    h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
     label {
       display: block;
-      font-weight: 650;
-      font-size: 13px;
-      margin: 12px 0 6px;
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--muted);
+      margin: 14px 0 6px;
     }
     input, select, textarea {
       width: 100%;
       border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 10px;
+      border-radius: var(--radius);
+      padding: 9px 12px;
       font: inherit;
-      background: #fff;
+      font-size: 14px;
+      background: var(--panel);
       color: var(--ink);
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(3,105,161,0.12);
     }
     textarea { min-height: 120px; resize: vertical; }
     .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
     .jobs { display: grid; gap: 10px; }
     .job {
       border: 1px solid var(--line);
-      background: #fff;
-      border-radius: 8px;
+      background: var(--panel);
+      border-radius: var(--radius);
       padding: 14px;
       display: grid;
       grid-template-columns: 88px minmax(0, 1fr);
       gap: 12px;
+      transition: box-shadow 0.12s;
     }
+    .job:hover { box-shadow: 0 2px 8px rgba(3,105,161,0.10); }
     .score {
       width: 72px;
       height: 72px;
       display: grid;
       place-items: center;
       border-radius: 50%;
-      border: 6px solid var(--accent);
+      border: 5px solid var(--accent);
       font-size: 20px;
       font-weight: 800;
+      color: var(--accent);
+      background: var(--accent-light);
     }
-    .score.low { border-color: var(--danger); }
-    .score.mid { border-color: var(--accent-2); }
-    .meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+    .score.low { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+    .score.mid { border-color: var(--accent-2); color: var(--accent-2); background: var(--accent-2-bg); }
+    .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; line-height: 1.6; }
     .tag {
       display: inline-flex;
       align-items: center;
-      min-height: 24px;
+      min-height: 22px;
       padding: 2px 8px;
       border-radius: 999px;
-      background: var(--soft);
+      background: var(--accent-light);
       border: 1px solid var(--line);
-      font-size: 12px;
-      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
       margin-right: 4px;
       margin-top: 6px;
     }
@@ -7927,26 +7984,39 @@ INDEX_HTML = r"""<!doctype html>
       white-space: pre-wrap;
       background: var(--soft);
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: var(--radius);
       padding: 12px;
       overflow: auto;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 13px;
+      line-height: 1.6;
     }
     .notice {
-      border-left: 4px solid var(--accent-2);
-      background: #fff7ed;
-      padding: 12px;
+      border-left: 3px solid var(--accent-2);
+      background: var(--accent-2-bg);
+      padding: 12px 14px;
       margin-bottom: 16px;
-      border-radius: 6px;
-      color: #4a2c0a;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      color: #78350F;
+      font-size: 13px;
+    }
+    .notice.bad {
+      border-left-color: var(--danger);
+      background: var(--danger-bg);
+      color: #991B1B;
+    }
+    .notice.ok {
+      border-left-color: var(--good);
+      background: var(--good-bg);
+      color: #14532D;
     }
     .reminder {
       border: 1px solid var(--line);
-      background: #ffffff;
-      border-radius: 6px;
-      padding: 12px;
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 14px;
       margin-top: 10px;
+      box-shadow: 0 1px 3px rgba(3,105,161,0.04);
     }
     .metric-grid {
       display: grid;
@@ -7956,34 +8026,39 @@ INDEX_HTML = r"""<!doctype html>
     }
     .metric {
       border: 1px solid var(--line);
-      background: #fff;
-      border-radius: 8px;
-      padding: 12px;
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 14px;
       min-height: 82px;
+      box-shadow: 0 1px 3px rgba(3,105,161,0.04);
     }
     .metric strong {
       display: block;
-      font-size: 24px;
+      font-size: 26px;
+      font-weight: 700;
       line-height: 1.1;
       margin-bottom: 4px;
+      color: var(--accent);
     }
     table {
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
-      background: #fff;
+      background: var(--panel);
     }
     th, td {
       border-bottom: 1px solid var(--line);
-      padding: 9px 8px;
+      padding: 10px 8px;
       text-align: left;
       vertical-align: top;
     }
-    th { color: var(--muted); font-weight: 700; }
-    .ok { color: var(--good); }
-    .bad { color: var(--danger); }
+    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; background: var(--soft); }
+    tr:hover td { background: var(--soft); }
+    .ok { color: var(--good); font-weight: 600; }
+    .bad { color: var(--danger); font-weight: 600; }
     .muted { color: var(--muted); }
-    a { color: #075985; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
     .hidden { display: none; }
     .tool-grid {
       display: grid;
@@ -7993,12 +8068,14 @@ INDEX_HTML = r"""<!doctype html>
     }
     .tool-card {
       border: 1px solid var(--line);
-      background: #fff;
-      border-radius: 8px;
-      padding: 14px;
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 16px;
       min-height: 130px;
+      transition: box-shadow 0.12s, border-color 0.12s;
     }
-    .tool-card h3 { font-size: 16px; margin-bottom: 6px; }
+    .tool-card:hover { box-shadow: 0 2px 8px rgba(3,105,161,0.10); border-color: var(--accent); }
+    .tool-card h3 { font-size: 15px; margin-bottom: 6px; font-weight: 600; }
     .hero-copy {
       display: grid;
       gap: 10px;
@@ -8018,10 +8095,111 @@ INDEX_HTML = r"""<!doctype html>
       display: block;
       margin-bottom: 4px;
     }
+    /* ── Status badges ── */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .status-draft    { background: #F1F5F9; color: #475569; }
+    .status-ready    { background: var(--accent-light); color: var(--accent); }
+    .status-applied  { background: var(--good-bg); color: var(--good); }
+    .status-interview{ background: #F5F3FF; color: #7C3AED; }
+    .status-offer    { background: #FFF9C4; color: #92400E; }
+    .status-rejected { background: var(--danger-bg); color: var(--danger); }
+
+    /* ── Pipeline progress bar ── */
+    .pipeline {
+      display: flex;
+      gap: 0;
+      margin-bottom: 20px;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--line);
+    }
+    .pipeline-step {
+      flex: 1;
+      padding: 10px 8px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--soft);
+      color: var(--muted);
+      border-right: 1px solid var(--line);
+      transition: background 0.15s;
+    }
+    .pipeline-step:last-child { border-right: none; }
+    .pipeline-step.active { background: var(--accent); color: #fff; }
+    .pipeline-step.done   { background: var(--good-bg); color: var(--good); }
+    .pipeline-step .step-num {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 2px;
+    }
+
+    /* ── Queue card improvements ── */
+    .queue-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px;
+      background: var(--panel);
+      box-shadow: 0 1px 4px rgba(3,105,161,0.06);
+      transition: box-shadow 0.15s, border-color 0.15s;
+    }
+    .queue-card:hover { box-shadow: 0 3px 12px rgba(3,105,161,0.12); border-color: var(--accent); }
+    .queue-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .queue-card-title { font-weight: 700; font-size: 15px; color: var(--ink); }
+    .queue-card-company { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+    /* ── Section intro text ── */
+    .section-intro {
+      color: var(--muted);
+      font-size: 13px;
+      margin: -4px 0 16px;
+      line-height: 1.6;
+    }
+
+    /* ── Empty states ── */
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--muted);
+    }
+    .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state h3 { color: var(--ink); margin-bottom: 8px; }
+    .empty-state p  { font-size: 13px; margin-bottom: 16px; }
+
+    /* ── Improved reminder cards ── */
+    .reminder { border-left: 3px solid var(--accent); }
+    .reminder h3 { color: var(--accent); }
+
+    /* ── Better metric numbers ── */
+    .metric .metric-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); }
+    .metric.metric-applied strong { color: var(--good); }
+    .metric.metric-queue  strong  { color: var(--accent); }
+    .metric.metric-due    strong  { color: var(--accent-2); }
+
+    /* ── h1 branding ── */
+    h1 span.app-tagline { font-size: 12px; font-weight: 400; color: var(--muted); display: block; margin-top: 1px; }
+
     @media (max-width: 920px) {
       .grid, .row, .metric-grid, .tool-grid { grid-template-columns: 1fr; }
       .job { grid-template-columns: 1fr; }
       .score { width: 60px; height: 60px; }
+      .pipeline { flex-wrap: wrap; }
+      .pipeline-step { flex: 1 1 30%; }
     }
   </style>
 </head>
@@ -8029,29 +8207,28 @@ INDEX_HTML = r"""<!doctype html>
   <header>
     <div class="topbar">
       <div>
-        <h1>Job Application AI</h1>
-        <div class="sub">Local, supervised graduate-marketing job workspace</div>
+        <h1>Job Application AI <span class="app-tagline">Your personal job search assistant</span></h1>
       </div>
       <div class="nav-stack">
         <nav class="nav-primary">
-          <button data-tab="dashboard" class="active">Today</button>
-          <button data-tab="auto_apply_queue">Queue</button>
-          <button data-tab="applications">Applications</button>
-          <button data-tab="outreach">Outreach</button>
-          <button data-tab="resume_lab">Documents</button>
-          <button data-tab="profile">Settings</button>
-          <button data-tab="email">Email</button>
-          <button id="advancedToggle" type="button">Advanced</button>
+          <button data-tab="dashboard" class="active">🏠 Home</button>
+          <button data-tab="auto_apply_queue">📋 My Queue</button>
+          <button data-tab="applications">✏️ Drafts</button>
+          <button data-tab="outreach">📨 Contact Companies</button>
+          <button data-tab="resume_lab">📄 My CV</button>
+          <button data-tab="profile">👤 My Profile</button>
+          <button data-tab="email">📬 Follow-ups</button>
+          <button id="advancedToggle" type="button">More ▾</button>
         </nav>
         <nav id="advancedNav" class="nav-secondary">
-          <button data-tab="discover">Discover</button>
-          <button data-tab="targets">Targets</button>
-          <button data-tab="jobs">Jobs</button>
-          <button data-tab="ats_scanner">ATS Scanner</button>
-          <button data-tab="interview_prep">Interview Prep</button>
-          <button data-tab="auto">Ops</button>
-          <button data-tab="analytics">Analytics</button>
-          <button data-tab="session">Session</button>
+          <button data-tab="discover">🔍 Find Jobs</button>
+          <button data-tab="targets">⭐ Dream Companies</button>
+          <button data-tab="jobs">💼 All Jobs</button>
+          <button data-tab="ats_scanner">✅ Readiness Check</button>
+          <button data-tab="interview_prep">🎤 Interview Prep</button>
+          <button data-tab="auto">⚙️ Automation</button>
+          <button data-tab="analytics">📊 My Stats</button>
+          <button data-tab="session">💾 Save Session</button>
         </nav>
       </div>
     </div>
@@ -8062,7 +8239,27 @@ INDEX_HTML = r"""<!doctype html>
 
     <section id="dashboard" class="active">
       <div class="notice">
-        This assistant prepares and tracks applications. It stops before final submission and does not bypass CAPTCHA, login, rate limits, or platform restrictions.
+        This tool helps you find jobs, write applications, and track follow-ups. It prepares everything for you — but <strong>you always click the final submit button yourself</strong>.
+      </div>
+      <div class="pipeline">
+        <div class="pipeline-step">
+          <span class="step-num">🔍</span>Find Jobs
+        </div>
+        <div class="pipeline-step">
+          <span class="step-num">✏️</span>Write Draft
+        </div>
+        <div class="pipeline-step">
+          <span class="step-num">📋</span>Fill Form
+        </div>
+        <div class="pipeline-step">
+          <span class="step-num">📤</span>You Submit
+        </div>
+        <div class="pipeline-step">
+          <span class="step-num">📬</span>Follow Up
+        </div>
+        <div class="pipeline-step">
+          <span class="step-num">🎤</span>Interview
+        </div>
       </div>
       <div class="grid">
         <div>
@@ -8091,26 +8288,26 @@ INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Auto Apply Queue</h2>
-            <p class="muted">This is the live queue for supervised applications. Refresh for a new batch, reject weak roles, then prepare the strongest ones in a visible browser.</p>
+            <h2>Review &amp; Approve</h2>
+            <p class="section-intro">These are the jobs waiting for your decision. <strong>Approve</strong> the ones you like, <strong>Skip</strong> the ones you don't, or <strong>Hold</strong> ones you're unsure about. Once approved, click <em>Fill in application form</em> to get started.</p>
             <div class="actions">
-              <button class="btn primary" onclick="refreshApplicationQueue()">Refresh with new options</button>
-              <button class="btn" onclick="showTab('applications')">Open full draft editor</button>
+              <button class="btn primary" onclick="refreshApplicationQueue()">Refresh options</button>
+              <button class="btn" onclick="showTab('applications')">Open draft editor</button>
             </div>
             <div id="queueSummary"></div>
           </div>
           <div class="panel">
-            <h2>Current Batch</h2>
+            <h2>Today&apos;s Applications</h2>
             <div id="queueBatch"></div>
           </div>
         </div>
         <div>
           <div class="panel">
-            <h2>ATS Status</h2>
+            <h2>Application Form Stats</h2>
             <div id="queueDomainHealth"></div>
           </div>
           <div class="panel">
-            <h2>Batch Controls</h2>
+            <h2>Bulk Actions</h2>
             <div id="queueControls"></div>
           </div>
         </div>
@@ -8121,7 +8318,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Resume Lab</h2>
+            <h2>My CV &amp; Documents</h2>
             <p class="muted">Keep your main CV, tailored variants, and reusable career documents in one place.</p>
             <div id="resumeLabSummary"></div>
           </div>
@@ -8130,11 +8327,11 @@ INDEX_HTML = r"""<!doctype html>
             <div id="resumeLabCvVersions"></div>
           </div>
           <div class="panel">
-            <h2>Tailored Drafts</h2>
+            <h2>Tailored Versions</h2>
             <div id="resumeLabDrafts"></div>
           </div>
           <div class="panel">
-            <h2>Generated Packs</h2>
+            <h2>Your Application Files</h2>
             <div id="resumeLabArtifacts"></div>
           </div>
         </div>
@@ -8144,11 +8341,11 @@ INDEX_HTML = r"""<!doctype html>
             <div id="resumeLabEditor"></div>
           </div>
           <div class="panel">
-            <h2>Profile Snapshot</h2>
+            <h2>Your Profile Summary</h2>
             <div id="resumeLabProfile"></div>
           </div>
           <div class="panel">
-            <h2>Writing Voice</h2>
+            <h2>Your Writing Style</h2>
             <div id="resumeLabVoice"></div>
           </div>
         </div>
@@ -8159,22 +8356,22 @@ INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>ATS Scanner</h2>
+            <h2>Is Your Application Ready?</h2>
             <p class="muted">Review readiness before you spend time preparing a live form.</p>
             <div id="scannerOverview"></div>
           </div>
           <div class="panel">
-            <h2>Application Readiness</h2>
+            <h2>Is Your Application Ready?</h2>
             <div id="scannerApplications"></div>
           </div>
         </div>
         <div>
             <div class="panel">
-              <h2>Quality Hotspots</h2>
+              <h2>What Needs Attention</h2>
               <div id="scannerHotspots"></div>
             </div>
             <div class="panel">
-              <h2>ATS Platform Stats</h2>
+              <h2>Application Form Results</h2>
               <div id="scannerPlatforms"></div>
             </div>
         </div>
@@ -8190,7 +8387,7 @@ INDEX_HTML = r"""<!doctype html>
             <div id="interviewPrepOverview"></div>
           </div>
           <div class="panel">
-            <h2>Interview Signals</h2>
+            <h2>Signs You&apos;re Getting an Interview</h2>
             <div id="interviewPrepSignals"></div>
           </div>
           <div class="panel">
@@ -8250,18 +8447,19 @@ INDEX_HTML = r"""<!doctype html>
         <label>Writing sample text</label><textarea id="profile_writing_sample_text" style="min-height:180px" placeholder="Paste something you wrote naturally, or add a document path above and extract it."></textarea>
         <label>Writing style notes</label><textarea id="profile_writing_style_notes" style="min-height:140px"></textarea>
         <div class="actions">
-          <button class="btn primary" onclick="saveProfile()">Save profile</button>
-          <button class="btn" onclick="extractCv()">Try CV extraction</button>
-          <button class="btn" onclick="extractWritingSample()">Extract/analyse writing sample</button>
+          <button class="btn primary" onclick="saveProfile()">Save my profile</button>
+          <button class="btn" onclick="extractCv()">Read my CV</button>
+          <button class="btn" onclick="extractWritingSample()">Analyse my writing style</button>
         </div>
       </div>
     </section>
 
     <section id="discover">
+      <p class="section-intro">Pull in job listings from company career pages and job boards. The tool filters them automatically and shows you the best matches.</p>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>ATS Discovery</h2>
+            <h2>Search for Jobs</h2>
             <p class="muted">Use public board tokens/site names. Examples: a Greenhouse board token from boards.greenhouse.io/company, a Lever site from jobs.lever.co/company, or an Ashby board name.</p>
             <div class="row">
               <div>
@@ -8279,12 +8477,12 @@ INDEX_HTML = r"""<!doctype html>
             </div>
             <label>Optional search query</label><input id="discover_query" value="graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator">
             <div class="actions">
-              <button class="btn primary" onclick="discover()">Import jobs</button>
-              <button class="btn" onclick="useGraduateDiscoveryQuery()">Use graduate marketing query</button>
+              <button class="btn primary" onclick="discover()">Search now</button>
+              <button class="btn" onclick="useGraduateDiscoveryQuery()">Use my default search</button>
             </div>
           </div>
           <div class="panel">
-            <h2>Automatic Sources</h2>
+            <h2>Automatic Job Sources</h2>
             <p class="muted">Saved sources rerun once per day while this local app is open. Use ATS board tokens/company identifiers or a direct careers URL.</p>
             <div class="row">
               <div><label>Name</label><input id="source_name" placeholder="Nike Greenhouse"></div>
@@ -8311,20 +8509,20 @@ INDEX_HTML = r"""<!doctype html>
             <label><input id="source_enabled" type="checkbox" style="width:auto" checked> Enabled for daily discovery</label>
             <div class="actions">
               <button class="btn primary" onclick="saveSource()">Save source</button>
-              <button class="btn" onclick="seedStarterSources()">Seed starter sources</button>
-              <button class="btn" onclick="runAllSources()">Run all enabled now</button>
+              <button class="btn" onclick="seedStarterSources()">Add starter job sources</button>
+              <button class="btn" onclick="runAllSources()">Search all sources now</button>
             </div>
             <div id="sourceList"></div>
           </div>
           <div class="panel">
-            <h2>Add Job URL</h2>
+            <h2>Add a Job by Link</h2>
             <label>Job URL</label><input id="url_import" placeholder="https://...">
             <div class="actions">
               <button class="btn primary" onclick="importUrl()">Fetch URL</button>
             </div>
           </div>
           <div class="panel">
-            <h2>Import Job Alert</h2>
+            <h2>Import a Job Alert Email</h2>
             <p class="muted">Paste a LinkedIn, Indeed, Google Alert, recruiter, or company job-alert email. The app extracts job links and saves them for scoring/review without scraping protected pages.</p>
             <label>Alert source</label><input id="alert_source" value="email-alert">
             <label>Alert email/text</label><textarea id="alert_text" style="min-height:220px" placeholder="Paste the full job alert email or saved-search text here."></textarea>
@@ -8333,7 +8531,7 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
           <div class="panel">
-            <h2>Add Job Manually</h2>
+            <h2>Add a Job by Hand</h2>
             <div class="row">
               <div><label>Title</label><input id="manual_title"></div>
               <div><label>Company</label><input id="manual_company"></div>
@@ -8347,7 +8545,7 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
         <div class="panel">
-          <h2>Source Notes</h2>
+          <h2>Notes on This Source</h2>
           <p>LinkedIn and Indeed are best used here as guided/manual sources: open searches, save promising jobs, paste the job URL or description, then let this app draft and track the application.</p>
           <p>For company career pages and ATS boards, use the URL importer or public API import where available.</p>
           <div id="discoverLinks"></div>
@@ -8361,7 +8559,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Target Companies</h2>
+            <h2>Companies You Want to Work At</h2>
             <p class="muted">Keep the 20-50 companies you actively want to track. Convert a target into an automatic source when you have a careers URL or ATS token, or into an outreach lead when no role is advertised.</p>
             <input id="target_id" type="hidden">
             <div class="row">
@@ -8411,13 +8609,13 @@ INDEX_HTML = r"""<!doctype html>
             <label>Source query</label><input id="target_source_query" value="graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator">
             <label>Notes / why they fit</label><textarea id="target_notes" placeholder="Specific products, campaigns, community, brand angle, or contact ideas."></textarea>
             <div class="actions">
-              <button class="btn primary" onclick="saveTarget()">Save target</button>
+              <button class="btn primary" onclick="saveTarget()">Save company</button>
               <button class="btn" onclick="clearTargetForm()">New target</button>
-              <button class="btn" onclick="seedStarterTargets()">Seed starter targets</button>
+              <button class="btn" onclick="seedStarterTargets()">Add starter dream companies</button>
             </div>
           </div>
           <div class="panel">
-            <h2>Bulk Import</h2>
+            <h2>Add Many Companies at Once</h2>
             <p class="muted">One company per line. Format: Company | website | industry | careers URL | notes</p>
             <textarea id="target_bulk" placeholder="Salomon | https://www.salomon.com | Outdoor sports | https://www.salomon.com/careers | Trail running and outdoor brand"></textarea>
             <div class="actions">
@@ -8426,7 +8624,7 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
         <div class="panel">
-          <h2>Target List</h2>
+          <h2>Your Dream Company List</h2>
           <div id="targetList"></div>
         </div>
       </div>
@@ -8434,19 +8632,19 @@ INDEX_HTML = r"""<!doctype html>
 
     <section id="jobs">
       <div class="panel">
-        <h2>Job Queue</h2>
+        <h2>Found Jobs</h2>
         <div class="actions">
           <select id="job_filter" onchange="renderJobs()">
             <option value="">All statuses</option>
             <option value="new">New</option>
-            <option value="shortlisted">Shortlisted</option>
-            <option value="drafted">Drafted</option>
+            <option value="shortlisted">Picked for review</option>
+            <option value="drafted">Draft</option>
             <option value="applied">Applied</option>
             <option value="rejected">Rejected</option>
           </select>
-          <button class="btn" onclick="rescoreJobs()">Rescore jobs</button>
-          <button class="btn primary" onclick="shortlistTopJobs()">Shortlist top 5</button>
-          <button class="btn" onclick="generateShortlistDrafts()">Generate shortlist drafts</button>
+          <button class="btn" onclick="rescoreJobs()">Refresh job scores</button>
+          <button class="btn primary" onclick="shortlistTopJobs()">Pick my top 5 jobs</button>
+          <button class="btn" onclick="generateShortlistDrafts()">Create drafts for top jobs</button>
         </div>
         <div id="jobList" class="jobs"></div>
       </div>
@@ -8456,13 +8654,13 @@ INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Application Drafts</h2>
+            <h2>Your Application Drafts</h2>
             <p class="muted">Open one draft, prepare the form, then submit it yourself.</p>
             <div id="applicationDomainBlocks"></div>
             <div class="actions">
-              <button class="btn primary" onclick="refreshApplicationQueue()">Refresh with new options</button>
+              <button class="btn primary" onclick="refreshApplicationQueue()">Refresh options</button>
               <button class="btn" onclick="showTab('auto_apply_queue')">Open queue board</button>
-              <button class="btn" onclick="runFormFillSmokeTest()">Smoke test</button>
+              <button class="btn" onclick="runFormFillSmokeTest()">Test form filling</button>
             </div>
             <div class="actions">
               <label for="application_view_mode" style="margin:0">View</label>
@@ -8496,7 +8694,7 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
         <div class="panel">
-          <h2>Edit Draft</h2>
+          <h2>Edit Your Application</h2>
           <div id="applicationEditor" class="muted">Select an application draft.</div>
         </div>
       </div>
@@ -8506,7 +8704,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Direct Outreach</h2>
+            <h2>Reach Out to a Company</h2>
             <div class="notice">
               Use this for thoughtful one-to-one emails to founders, owners, or hiring people at brands you genuinely want to work with. The app drafts the email, but you still review it before anything is sent.
             </div>
@@ -8527,17 +8725,17 @@ INDEX_HTML = r"""<!doctype html>
             <label>Why this brand fits / why you fit</label><textarea id="lead_company_notes" placeholder="What you genuinely like about the brand, what stands out, how your background lines up, and what kind of support you could offer."></textarea>
             <label>Contact-finding notes</label><textarea id="lead_contact_search_notes" placeholder="Who to look for, where to search, and any public contact paths you want to try."></textarea>
             <div class="actions">
-              <button class="btn primary" onclick="saveLead()">Save lead</button>
+              <button class="btn primary" onclick="saveLead()">Save company</button>
               <button class="btn" onclick="showTab('targets')">Use a target company instead</button>
             </div>
           </div>
           <div class="panel">
-            <h2>Saved Outreach Leads</h2>
+            <h2>Companies You&apos;ve Contacted</h2>
             <div id="leadList"></div>
           </div>
         </div>
         <div class="panel">
-          <h2>Write And Send</h2>
+          <h2>Write &amp; Send</h2>
           <div id="leadEditor" class="muted">Select a company lead.</div>
         </div>
       </div>
@@ -8551,21 +8749,21 @@ INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Application Funnel</h2>
+            <h2>Application Pipeline</h2>
             <div id="analyticsFunnel"></div>
           </div>
           <div class="panel">
-            <h2>Source Quality</h2>
+            <h2>Which Sources Work Best</h2>
             <div id="analyticsSources"></div>
           </div>
         </div>
         <div>
           <div class="panel">
-            <h2>Follow-up Health</h2>
+            <h2>Follow-up Status</h2>
             <div id="analyticsFollowups"></div>
           </div>
           <div class="panel">
-            <h2>Replies And Outcomes</h2>
+            <h2>Replies &amp; Outcomes</h2>
             <div id="analyticsReplies"></div>
           </div>
           <div class="panel">
@@ -8580,33 +8778,33 @@ INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div>
           <div class="panel">
-            <h2>Automatic Mode</h2>
+            <h2>Run Everything Automatically</h2>
             <div class="notice">
               Automatic mode prepares the work queue, but it does not submit applications or send emails. Final submission and final send stay manual.
             </div>
             <label>Daily application target</label><input id="auto_limit" value="5" type="number" min="1" max="15">
             <div class="actions">
-              <button class="btn primary" onclick="runAutomaticMode()">Run automatic mode</button>
-              <button class="btn" onclick="exportReminders()">Export reminder calendar</button>
-              <button class="btn" onclick="notifyDueReminders()">Notify due now</button>
+              <button class="btn primary" onclick="runAutomaticMode()">Run full workflow</button>
+              <button class="btn" onclick="exportReminders()">Export follow-up reminders</button>
+              <button class="btn" onclick="notifyDueReminders()">Send due reminders now</button>
               <button class="btn" onclick="showTab('dashboard')">Review Daily Review</button>
               <button class="btn" onclick="showTab('analytics')">View Analytics</button>
             </div>
             <div id="autoStatus"></div>
           </div>
           <div class="panel">
-            <h2>Latest Runs</h2>
+            <h2>Recent Automation Runs</h2>
             <div id="automationRuns"></div>
           </div>
           <div class="panel">
-            <h2>Source Cleanup</h2>
+            <h2>Fix Broken Sources</h2>
             <div class="actions">
-              <button class="btn" onclick="pauseFailingSources()">Pause failing sources</button>
+              <button class="btn" onclick="pauseFailingSources()">Pause broken sources</button>
             </div>
             <div id="sourceCleanup"></div>
           </div>
           <div class="panel">
-            <h2>Form Fill Feedback</h2>
+            <h2>Application Form Feedback</h2>
             <div id="formFeedbackSummary"></div>
           </div>
         </div>
@@ -8643,7 +8841,7 @@ INDEX_HTML = r"""<!doctype html>
           <label><input id="email_starttls" type="checkbox" style="width:auto" checked> Use STARTTLS/encryption on port 587</label>
           <div class="actions">
             <button class="btn primary" onclick="saveEmailConfig()">Save email settings</button>
-            <button class="btn" onclick="sendTestEmail()">Send test email</button>
+            <button class="btn" onclick="sendTestEmail()">Send a test email</button>
           </div>
         </div>
         <div class="panel">
@@ -8669,7 +8867,7 @@ INDEX_HTML = r"""<!doctype html>
           <label><input id="inbox_ssl" type="checkbox" style="width:auto" checked> Use SSL/TLS on port 993</label>
           <div class="actions">
             <button class="btn primary" onclick="saveInboxConfig()">Save inbox settings</button>
-            <button class="btn" onclick="scanInbox()">Scan inbox now</button>
+            <button class="btn" onclick="scanInbox()">Check inbox now</button>
           </div>
           <div id="inboxStatus"></div>
         </div>
@@ -8683,17 +8881,17 @@ INDEX_HTML = r"""<!doctype html>
     <section id="session">
       <div class="grid">
         <div class="panel">
-          <h2>Session Memory</h2>
+          <h2>Session Notes</h2>
           <p class="muted">This is the durable handoff future sessions read before continuing the project. Use the draft button near the end of a work session, review the text, then save it.</p>
           <textarea id="session_memory" style="min-height:520px"></textarea>
           <div class="actions">
             <button class="btn" onclick="refreshSessionMemory()">Refresh</button>
-            <button class="btn primary" onclick="generateEndSessionDraft()">Generate end-session draft</button>
-            <button class="btn warn" onclick="saveSessionMemory()">Save memory file</button>
+            <button class="btn primary" onclick="generateEndSessionDraft()">Write session summary</button>
+            <button class="btn warn" onclick="saveSessionMemory()">Save session notes</button>
           </div>
         </div>
         <div class="panel">
-          <h2>Memory Rules</h2>
+          <h2>Remember for Next Time</h2>
           <pre>When Phillip says "end session", update SESSION_MEMORY.md before replying.
 
 Do not store passwords, SMTP secrets, API keys, cookies, or private tokens.
@@ -8856,7 +9054,7 @@ Record:
               ${review} role(s) need a keep/reject decision and ${approved} role(s) are already approved.
               <div class="actions">
                 <button class="btn primary" onclick="showTab('auto_apply_queue')">Open queue</button>
-                <button class="btn" onclick="showTab('ats_scanner')">Check readiness</button>
+                <button class="btn" onclick="showTab('ats_scanner')">Check application readiness</button>
               </div>
             </div>
             <div class="workflow-step">
@@ -9011,8 +9209,8 @@ Record:
               <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
               <button class="btn" onclick="setApplicationQueueState(${app.id}, 'review')">Review</button>
               <button class="btn primary" onclick="selectApplication(${app.id})">Edit draft</button>
-              ${boardBlocked ? "" : `<button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>`}
-              <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">No thanks</button>
+              ${boardBlocked ? "" : `<button class="btn" onclick="prepareApplicationCard(${app.id})">Fill in application form</button>`}
+              <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">Skip this role</button>
               ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">${boardBlocked ? "Open listing" : "Open job"}</a>` : ""}
             </div>
           </div>
@@ -9048,8 +9246,8 @@ Record:
           <button class="btn primary" onclick="refreshApplicationQueue()">Pull next batch</button>
           <button class="btn" onclick="cleanupStaleApplications()">Clean stale drafts</button>
           <button class="btn" onclick="approveSafeQueueRoles()">Approve safe roles</button>
-          <button class="btn" onclick="holdBlockedQueueRoles()">Hold blocked ATS roles</button>
-          <button class="btn" onclick="returnQueueToReview()">Reset queue to review</button>
+          <button class="btn" onclick="holdBlockedQueueRoles()">Hold roles needing manual apply</button>
+          <button class="btn" onclick="returnQueueToReview()">Move all back to review</button>
           <button class="btn" onclick="showTab('discover')">Add more sources</button>
           <button class="btn" onclick="showTab('analytics')">Check source quality</button>
         </div>
@@ -9320,7 +9518,7 @@ Record:
         target.innerHTML = `
           <p class="muted">No application drafts yet.</p>
           <div class="actions">
-            <button class="btn primary" onclick="runDailyWorkflow()">Run daily workflow</button>
+            <button class="btn primary" onclick="runDailyWorkflow()">Run today&apos;s workflow</button>
             <button class="btn" onclick="showTab('jobs')">Review jobs</button>
           </div>
         `;
@@ -9345,8 +9543,8 @@ Record:
             <div class="actions">
               <button class="btn primary" onclick="selectApplication(${app.id})">Review draft</button>
               ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">${isBoardPrepBlockedApp(app) ? "Find apply URL" : "Open job"}</a>` : ""}
-              ${!isBoardPrepBlockedApp(app) ? `<button class="btn" onclick="prepareApplicationFromDashboard(${app.id})">Prepare form</button>` : ""}
-              <button class="btn warn" onclick="markApplicationSubmittedFromDashboard(${app.id})">Mark submitted</button>
+              ${!isBoardPrepBlockedApp(app) ? `<button class="btn" onclick="prepareApplicationFromDashboard(${app.id})">Fill in application form</button>` : ""}
+              <button class="btn warn" onclick="markApplicationSubmittedFromDashboard(${app.id})">I applied for this</button>
             </div>
           </div>
         `;
@@ -9570,8 +9768,8 @@ Record:
               <pre>${escapeHtml(job.score_reasons || "")}${job.concerns ? "\n\nConcerns:\n" + escapeHtml(job.concerns) : ""}</pre>
               <details><summary>Description</summary><pre>${escapeHtml(job.description || "")}</pre></details>
               <div class="actions">
-                <button class="btn" onclick="setJobStatus(${job.id}, 'shortlisted')">Shortlist</button>
-                <button class="btn primary" onclick="generateApplication(${job.id})">Generate draft</button>
+                <button class="btn" onclick="setJobStatus(${job.id}, 'shortlisted')">Pick for review</button>
+                <button class="btn primary" onclick="generateApplication(${job.id})">Create application draft</button>
                 <button class="btn" onclick="setTooSenior(${job.id}, ${job.too_senior ? "false" : "true"})">${job.too_senior ? "Allow again" : "Too senior for me"}</button>
                 <button class="btn" onclick="setJobStatus(${job.id}, 'applied')">Mark applied</button>
                 <button class="btn" onclick="setJobStatus(${job.id}, 'rejected')">Reject</button>
@@ -9958,9 +10156,9 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
             <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
             <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
             <button class="btn primary" onclick="selectApplication(${app.id})">Edit</button>
-            ${isBoardPrepBlockedApp(app) ? "" : `<button class="btn" onclick="prepareApplicationCard(${app.id})">Prepare form</button>`}
-            ${isBoardPrepBlockedApp(app) ? "" : `<button class="btn" onclick="resumeApplicationCard(${app.id})">Resume form</button>`}
-            <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">No thanks</button>
+            ${isBoardPrepBlockedApp(app) ? "" : `<button class="btn" onclick="prepareApplicationCard(${app.id})">Fill in application form</button>`}
+            ${isBoardPrepBlockedApp(app) ? "" : `<button class="btn" onclick="resumeApplicationCard(${app.id})">Continue filling form</button>`}
+            <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">Skip this role</button>
             ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">${isBoardPrepBlockedApp(app) ? "Open listing" : "Open job"}</a>` : ""}
             <a class="btn" href="${mailto(app)}">Email draft</a>
           </div>
@@ -10290,7 +10488,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
           <pre>${escapeHtml(Object.entries(artifacts).map(([key, value]) => `${key}: ${value}`).join("\n") || "No outreach files generated yet.")}</pre>
         </details>
         <div class="actions">
-          <button class="btn primary" onclick="saveLeadEdit()">Save lead</button>
+          <button class="btn primary" onclick="saveLeadEdit()">Save company</button>
           <button class="btn" onclick="generateLeadEmail()">Build outreach email</button>
           <button class="btn" onclick="humanizeLeadEmail()">Polish tone</button>
           <button class="btn warn" onclick="sendLeadEmail()">Send this email</button>
@@ -10357,14 +10555,14 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         <label>Follow-up email</label><textarea id="edit_follow_up">${escapeHtml(app.follow_up || "")}</textarea>
         <div class="actions">
           <button class="btn primary" onclick="saveApplication()">Save draft</button>
-          <button class="btn" onclick="humanizeApplication()">Humanize sent copy</button>
-          <button class="btn" onclick="researchApplication()">Research company</button>
+          <button class="btn" onclick="humanizeApplication()">Polish my writing</button>
+          <button class="btn" onclick="researchApplication()">Research this company</button>
           <button class="btn" onclick="useSavedResearchUrlNow()">Use saved URL now</button>
-          <button class="btn" onclick="regenerateFollowUp()">Regenerate personalized follow-up</button>
-          <button class="btn" onclick="prepareApplicationForm()">Prepare form</button>
-          <button class="btn" onclick="resumeApplicationForm()">Resume form</button>
-          <button class="btn warn" onclick="markApplicationSubmitted()">Mark submitted</button>
-          <button class="btn warn" onclick="rejectSelectedApplication()">No thanks</button>
+          <button class="btn" onclick="regenerateFollowUp()">Rewrite follow-up email</button>
+          <button class="btn" onclick="prepareApplicationForm()">Fill in application form</button>
+          <button class="btn" onclick="resumeApplicationForm()">Continue filling form</button>
+          <button class="btn warn" onclick="markApplicationSubmitted()">I applied for this</button>
+          <button class="btn warn" onclick="rejectSelectedApplication()">Skip this role</button>
           <a class="btn" href="${mailto(app)}">Open email draft</a>
           <button class="btn" onclick="sendFollowUp()">Send follow-up</button>
         </div>
