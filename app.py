@@ -7781,6 +7781,7 @@ INDEX_HTML = r"""<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Job Application AI</title>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <style>
     /* UI UX Pro Max — Swiss Modernism 2.0 + Job Board/Recruitment palette */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -8194,6 +8195,21 @@ INDEX_HTML = r"""<!doctype html>
     /* ── h1 branding ── */
     h1 span.app-tagline { font-size: 12px; font-weight: 400; color: var(--muted); display: block; margin-top: 1px; }
 
+    /* ── Lucide icons ── */
+    nav button i, .btn i {
+      width: 14px; height: 14px;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 5px;
+      margin-top: -2px;
+      stroke-width: 2.2px;
+    }
+    .pipeline-step i {
+      width: 20px; height: 20px;
+      display: block;
+      margin: 0 auto 4px;
+      stroke-width: 2px;
+    }
     @media (max-width: 920px) {
       .grid, .row, .metric-grid, .tool-grid { grid-template-columns: 1fr; }
       .job { grid-template-columns: 1fr; }
@@ -8211,24 +8227,24 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <div class="nav-stack">
         <nav class="nav-primary">
-          <button data-tab="dashboard" class="active">🏠 Home</button>
-          <button data-tab="auto_apply_queue">📋 My Queue</button>
-          <button data-tab="applications">✏️ Drafts</button>
-          <button data-tab="outreach">📨 Contact Companies</button>
-          <button data-tab="resume_lab">📄 My CV</button>
-          <button data-tab="profile">👤 My Profile</button>
-          <button data-tab="email">📬 Follow-ups</button>
+          <button data-tab="dashboard" class="active"><i data-lucide="house"></i> Home</button>
+          <button data-tab="auto_apply_queue"><i data-lucide="clipboard-list"></i> My Queue</button>
+          <button data-tab="applications"><i data-lucide="edit-3"></i> Drafts</button>
+          <button data-tab="outreach"><i data-lucide="send"></i> Contact Companies</button>
+          <button data-tab="resume_lab"><i data-lucide="file-text"></i> My CV</button>
+          <button data-tab="profile"><i data-lucide="user"></i> My Profile</button>
+          <button data-tab="email"><i data-lucide="mail"></i> Follow-ups</button>
           <button id="advancedToggle" type="button">More ▾</button>
         </nav>
         <nav id="advancedNav" class="nav-secondary">
-          <button data-tab="discover">🔍 Find Jobs</button>
-          <button data-tab="targets">⭐ Dream Companies</button>
-          <button data-tab="jobs">💼 All Jobs</button>
-          <button data-tab="ats_scanner">✅ Readiness Check</button>
-          <button data-tab="interview_prep">🎤 Interview Prep</button>
-          <button data-tab="auto">⚙️ Automation</button>
-          <button data-tab="analytics">📊 My Stats</button>
-          <button data-tab="session">💾 Save Session</button>
+          <button data-tab="discover"><i data-lucide="search"></i> Find Jobs</button>
+          <button data-tab="targets"><i data-lucide="star"></i> Dream Companies</button>
+          <button data-tab="jobs"><i data-lucide="briefcase"></i> All Jobs</button>
+          <button data-tab="ats_scanner"><i data-lucide="check-circle"></i> Readiness Check</button>
+          <button data-tab="interview_prep"><i data-lucide="mic"></i> Interview Prep</button>
+          <button data-tab="auto"><i data-lucide="settings"></i> Automation</button>
+          <button data-tab="analytics"><i data-lucide="bar-chart-2"></i> My Stats</button>
+          <button data-tab="session"><i data-lucide="save"></i> Save Session</button>
         </nav>
       </div>
     </div>
@@ -8243,22 +8259,22 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <div class="pipeline">
         <div class="pipeline-step">
-          <span class="step-num">🔍</span>Find Jobs
+          <i data-lucide="search"></i>Find Jobs
         </div>
         <div class="pipeline-step">
-          <span class="step-num">✏️</span>Write Draft
+          <i data-lucide="edit-3"></i>Write Draft
         </div>
         <div class="pipeline-step">
-          <span class="step-num">📋</span>Fill Form
+          <i data-lucide="clipboard"></i>Fill Form
         </div>
         <div class="pipeline-step">
-          <span class="step-num">📤</span>You Submit
+          <i data-lucide="send"></i>You Submit
         </div>
         <div class="pipeline-step">
-          <span class="step-num">📬</span>Follow Up
+          <i data-lucide="mail"></i>Follow Up
         </div>
         <div class="pipeline-step">
-          <span class="step-num">🎤</span>Interview
+          <i data-lucide="mic"></i>Interview
         </div>
       </div>
       <div class="grid">
@@ -11537,7 +11553,14 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       return escapeHtml(value).replace(/`/g, "&#96;");
     }
 
-    load().catch(error => message(error.message, "bad"));
+    load()
+      .then(() => { if (window.lucide) lucide.createIcons(); })
+      .catch(error => message(error.message, "bad"));
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => { if (window.lucide) lucide.createIcons(); });
+    } else if (window.lucide) {
+      lucide.createIcons();
+    }
   </script>
 </body>
 </html>
