@@ -698,13 +698,8 @@ function customPromptAnswer(prompt, task, field = {}) {
       reason: "US-specific location wording on a remote-friendly role. Review before submit."
     };
   }
-  if (field.tag === "textarea") {
-    return {
-      value: app.answers || app.cover_letter || motivationText(task) || "",
-      review: true,
-      reason: "General long-form answer drafted from the application pack."
-    };
-  }
+  // Never dump the full answers/cover letter into an unrecognised textarea.
+  // Return null so classifyField + answerForCategory handles it with the right answer.
   return null;
 }
 
@@ -1283,8 +1278,37 @@ function answerForCategory(category, field, task) {
         reason: "Years of experience — honest early-career answer. Review before submitting."
       };
     }
+    if (/\b(result|achievement|accomplishment).*(proud|proud of|you're proud|most proud)\b/.test(prompt) || /\b(proud of|most proud).*(result|achievement|marketing)\b/.test(prompt) || /tell us about a marketing result/.test(prompt)) {
+      return {
+        value: "The result I am most proud of at this stage of my career came from a personal content project. I used Google Analytics and Google Search Console to identify pages that were generating impressions but getting almost no clicks. I rewrote the title tags and meta descriptions for the three worst-performing pages, and tracked a consistent improvement in click-through rate over the following four weeks. It was not a large commercial campaign, but it taught me the core process I want to keep applying: use data to find the problem, make a targeted change, measure the outcome, and iterate. I am early in my career but I take results-thinking seriously and I am ready to do this at a much bigger scale.",
+        review: true,
+        reason: "Marketing result answer — honest early-career example. Edit with any stronger real result before submitting."
+      };
+    }
+    if (/\b(automation|automated|marketing automation|email automation|workflow automation)\b/.test(prompt) && /\b(built|created|set up|implemented|describe|complex|tell us|experience)\b/.test(prompt)) {
+      return {
+        value: "I have not led a complex production marketing automation system yet — I am honest about being early in my career. My closest hands-on experience is setting up basic email sequences and content workflows, and studying the logic behind CRM lifecycle flows, segmentation triggers, and behavioural messaging. I understand the conceptual structure of how automations should work: the trigger, the condition, the action, and the feedback loop. I would come into this role ready to learn the specific platform and stack you use, start with simple reliable flows, and take on complexity as I demonstrate the work is solid.",
+        review: true,
+        reason: "Marketing automation answer — honest early-career response. Review before submitting."
+      };
+    }
+    if (/(why.*(role|company|interested|join|want to work)|motivation|what draws you)/.test(prompt)) {
+      return {
+        value: motivationText(task) || app.cover_letter || "",
+        review: true,
+        reason: "Motivation/interest answer pulled from your application draft — review before submitting."
+      };
+    }
+    if (/\b(cover letter|tell us more|additional (information|comments)|anything else|supporting statement)\b/.test(prompt)) {
+      return {
+        value: app.cover_letter || "",
+        review: true,
+        reason: "Cover letter / additional info — pulled from your application draft."
+      };
+    }
+    // Unknown custom question — flag for manual input rather than dumping unrelated text
     return {
-      value: app.answers || app.cover_letter || "",
+      value: "",
       review: true,
       reason: "General custom question answer; review before submit."
     };
