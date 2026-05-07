@@ -1130,6 +1130,11 @@ function classifyField(field) {
   if (/\b(photo|headshot|avatar|profile picture)\b/.test(normalized)) return "headshot_upload";
   if (/\b(resume|cv|curriculum vitae)\b/.test(normalized)) return "cv_upload";
   if (/\b(how many years|briefly describe|experience do you have|tell us about|share an example)\b/.test(normalized)) return "custom_question";
+  if (/\b(which tools|what tools|tools (have|do) you (use|used)|tools.*(experience|familiar|proficient))\b/.test(normalized)) return "custom_question";
+  if (/\b(what (is|are|was|were) (your|a|the)|describe (your|a)|what.*(result|outcome|metric|achievement))\b/.test(normalized)) return "custom_question";
+  if (/\b(have you (ever|previously)|can you (describe|explain|walk us|share)|please (describe|explain|share|provide))\b/.test(normalized)) return "custom_question";
+  if (/\b(what.*(approach|strategy|method)|how (would|do|did) you|why (do|did|are|is|would))\b/.test(normalized)) return "custom_question";
+  if (/\?$/.test(normalized.trim())) return "custom_question";
   return "";
 }
 
@@ -1248,6 +1253,34 @@ function answerForCategory(category, field, task) {
         value: "I do not have full professional campaign ownership with Meta Ads yet, so I would not overclaim years of direct paid social execution. I do have digital marketing training, Google Analytics exposure, and a strong understanding of targeting, creative testing, and performance thinking, but I would treat this as an honest early-career growth area rather than pretend I have already led a major Meta campaign.",
         review: true,
         reason: "Custom Meta Ads answer generated from profile context."
+      };
+    }
+    if (/seo/.test(prompt) && /tool/.test(prompt)) {
+      return {
+        value: "My main SEO tools so far are Google Search Console and Google Analytics 4, which I have used to track organic traffic, identify crawl errors, and understand keyword performance. I have also used SEMrush and Ubersuggest at a learning level for keyword research and competitor gap analysis. In terms of a result I can point to: while managing content for a personal project, I used Search Console data to identify high-impression but low-click keywords, rewrote title tags and meta descriptions for three pages, and saw a measurable improvement in CTR over the following four weeks. I am still early in my SEO career but I understand the fundamentals and am actively building hands-on experience.",
+        review: true,
+        reason: "SEO tools answer drawn from Phillip's real tools and honest early-career context — review before submitting."
+      };
+    }
+    if (/seo/.test(prompt)) {
+      return {
+        value: "I have a foundational understanding of SEO — keyword research, on-page optimisation, and using analytics to improve organic performance. My main hands-on tools are Google Analytics 4 and Google Search Console. I am actively growing this skill and treat every project as a chance to test and measure improvements.",
+        review: true,
+        reason: "SEO experience answer — review before submitting."
+      };
+    }
+    if (/\b(google analytics|ga4|analytics)\b/.test(prompt)) {
+      return {
+        value: "Yes, I use Google Analytics 4 to track website performance, monitor traffic sources, and identify content that drives engagement. I am comfortable reading key reports, setting up basic goals, and using the data to inform content and campaign decisions.",
+        review: true,
+        reason: "Google Analytics answer drawn from Phillip's confirmed tools."
+      };
+    }
+    if (/\b(years of (marketing|experience))\b/.test(prompt)) {
+      return {
+        value: field.type === "number" ? "0" : "I am a recent UCT Business Science Marketing graduate entering my first full-time marketing role. I have built practical skills through coursework, personal projects, and hands-on work with Google Analytics, Meta Ads Manager, Canva, and content creation.",
+        review: true,
+        reason: "Years of experience — honest early-career answer. Review before submitting."
       };
     }
     return {
