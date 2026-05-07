@@ -1,107 +1,105 @@
 # Session Memory
 
-Last updated: 2026-05-07
+Last updated: 2026-05-07 (end of day)
 
 ## Project Goal
 
-Phillip is building a local, review-first job application assistant for early-career marketing roles. The app discovers suitable jobs, scores them, generates tailored application material from his CV and profile, prepares live application forms for review, tracks follow-ups, and aims for about 5 strong applications per day.
+Phillip is building a local, review-first job application assistant for early-career marketing roles. The app discovers suitable jobs, scores them, generates tailored application material, prepares live application forms for review, tracks follow-ups, and aims for about 5 strong applications per day.
 
 The system drafts and prepares — Phillip reviews and manually submits or sends.
 
 ## Current Local Setup
 
 - Project path: `/Users/phillip/Desktop/JOB APPLICATION AI`
-- Organised copy also at: `/Users/phillip/01_Active_Projects/Python_JobApplicationAI/`
 - Main app: `app.py` (single Python file, standard library only)
 - Local app URL: `http://127.0.0.1:8765`
 - Database: `data/job_application_ai.sqlite3`
-- Documents/output folder: `documents/`
 - LaunchAgent installed: `com.phillip.job-application-ai`
 - GitHub: `git@github.com:Phillip-de-Nobrega/job-application-ai.git`
-- Latest commit: `14e7e6f` Add Not Interested button and inline apply URL flow
+- Latest commit: `6edc49d` Move site credentials to visible panel
 
-## User Profile And Preferences
+## User Profile
 
 - Name: Phillip de Nobrega
-- Location: 4 Hauptville Circle, Constantia, Cape Town, Western Cape, 7806, South Africa
+- Location: Constantia, Cape Town, Western Cape, South Africa
 - Email: Phillip2002@mweb.co.za
 - Phone: +27 71 643 0185
 - LinkedIn: linkedin.com/in/phillip-de-nobrega-87542b353
-- Citizenship/work status: South African plus UK passport/citizenship
-- CV source: `/Users/phillip/Desktop/PHILLIP PERSONAL/Phillip_de_Nobrega_CV.pdf`
-- Salary target: about R22,000/month
+- Citizenship: South African + UK passport
+- CV: `/Users/phillip/Desktop/PHILLIP PERSONAL/Phillip_de_Nobrega_CV.pdf`
+- Salary target: ~R22,000/month
 - Full-time availability: 2027-01-01
-- Trial/project availability until: 2026-06-12
+- Trial/project availability: until 2026-06-12
 
 ### Role preferences
-
-- Target roles: graduate, junior, entry-level, assistant, coordinator, associate, specialist, content, brand, social media, growth, partnerships, community, campaign, PPC, SEO, CRM, copywriter, digital marketing
-- Avoid: manager, director, head, VP, leadership-heavy roles unless Phillip explicitly approves
-- Location rule: Cape Town / Western Cape for in-person or hybrid; otherwise clearly remote
-- Remote US/UK/Europe roles are acceptable when truly remote
+- Target: graduate, junior, entry-level, assistant, coordinator, content, brand, social media, growth, PPC, SEO, CRM, copywriter, digital marketing
+- Location: Cape Town in-person/hybrid OR clearly remote globally
+- Avoid: manager, director, VP roles
 
 ## Current Operational State
 
 - Jobs: ~879
-- Sources: 54 (33 enabled) — includes 8 new sources added this session:
-  BizCommunity SA, CareerJunction CT, We Work Remotely, Strava (Ashby),
-  Gymshark (careers), Virgin Active SA, HubSpot (Greenhouse), Decathlon SA
-- Active applications: 6 drafts (5 have RemoteOK listing URLs, 1 has real Ashby URL)
-- Duplicate Maneuver Marketing draft still present (apps 17 and 22) — needs cleanup
+- Sources: 54 (33 enabled)
+- Active application drafts: 6 (5 have RemoteOK listing URLs needing real apply links)
+- Duplicate Maneuver Marketing still present (apps 17 and 22) — remove one with "Not interested"
 
-## Work Done This Session (2026-05-07)
+## All Work Done This Session (2026-05-07)
 
-### Discovery improvements
-- Expanded `ENTRY_LEVEL_SIGNALS`: added entry level, entry-level, learnership, trainee, placement
-- Added "africa" to `REMOTE_ALLOWED_LOCATION_TERMS`
-- Strengthened `MARKETING_KEYWORDS`: digital marketing, influencer marketing, public relations, SEM, Google Ads, affiliate, storytelling, b2c, copy
-- Added 8 new job sources (BizCommunity, CareerJunction, Strava, HubSpot, etc.)
-- Fixed Strava → Ashby (not Lever), Gymshark → careers URL
-- Disabled Decathlon SA and We Work Remotely (403/blocking)
+### Discovery & scoring
+- ENTRY_LEVEL_SIGNALS: added entry level, entry-level, learnership, trainee, placement
+- REMOTE_ALLOWED_LOCATION_TERMS: added "africa"
+- MARKETING_KEYWORDS: added digital marketing, influencer marketing, public relations, SEM, google ads, affiliate, storytelling, b2c, copy
+- Added 8 new job sources (BizCommunity SA, CareerJunction CT, Strava/Ashby, Gymshark, Virgin Active SA, HubSpot/Greenhouse, We Work Remotely disabled, Decathlon SA disabled)
+- Rejection learning: score_job penalises prior "not really marketing" (−40) and "wrong location" (−35)
+- source_cleanup_recommendations flags sources with >60% rejection rate
 
-### SmartRecruiters fixes
-- `discover_smartrecruiters` now derives `jobs.smartrecruiters.com` apply URL from listing ref
-- Added SmartRecruiters apply button selectors to `form_filler.js`
+### Form prep critical fixes
+- Node.js at `/opt/homebrew/bin/node` not on subprocess PATH → fixed with `_find_node()`
+- SmartRecruiters: derive `jobs.smartrecruiters.com` apply URL from listing ref
+- SmartRecruiters apply button selector added to form_filler.js
 
-### Scoring / rejection learning
-- `score_job` now penalises "not really marketing" (−40) and "wrong location" (−35) prior rejects
-- `source_cleanup_recommendations` now flags sources with >60% rejection rate
+### UI/UX full redesign
+- UI/UX Pro Max skill applied: Swiss Modernism 2.0 + Job Board/Recruitment palette (#0369A1)
+- Lucide SVG icon library (CDN) replacing all emoji
+- 78 label replacements: plain English throughout
+- Pipeline progress bar on Home: Find → Write Draft → Fill Form → You Submit → Follow Up → Interview
+- Status colour badges, section intro text, hover states
 
-### Form prep critical fix
-- Node.js was at `/opt/homebrew/bin/node` but not on subprocess PATH — fixed in `_find_node()`
-- Form prep now works for real ATS URLs (confirmed on Sleeper/Ashby job)
+### Dashboard UX
+- "Review draft" scrolls editor into view
+- Error messages: 10s timeout + scroll into view
+- "Fill in application form" always visible on every card
+- RemoteOK/board-listing jobs: clicking Fill opens listing + inline paste field on card
+- "Not interested" button: one-click remove + replace, no prompts
+- `/api/jobs/update-url` endpoint to save pasted apply URL
 
-### UI/UX redesign
-- Applied UI/UX Pro Max skill: Swiss Modernism 2.0 + Job Board/Recruitment palette
-- Professional blue palette (#0369A1 primary, #16A34A success, #DC2626 danger)
-- Navigation: plain English with Lucide SVG icons (house, clipboard-list, edit-3, etc.)
-- 78 label replacements: "Prepare form"→"Fill in application form", "Mark submitted"→"I applied for this", "Humanize"→"Polish writing", "ATS Scanner"→"Readiness Check", etc.
-- Added 6-step pipeline progress bar on Home screen
-- Status colour badges, section intro text, empty state components
-- Removed all emoji, replaced with Lucide icon library (CDN)
+### Form filler intelligence
+- classifyField: 5 new open-ended question patterns caught (previously skipped silently)
+- answerForCategory: specific answers for SEO tools, marketing results, automation, motivation
+- Fixed root bug: generic textarea fallback was dumping all Q&A answers into unrecognised fields
+- Unknown questions now left blank + flagged for manual review
 
-### Dashboard UX fixes
-- "Review draft" now scrolls editor into view after tab switch
-- Error messages stay visible 10s and scroll into view
-- "Fill in application form" always shown on every card
-- For RemoteOK/board-listing URLs: clicking Fill opens listing in new tab + shows inline paste field on card
-- "Not interested" button: one-click removal + replacement, no prompts
-- Fixed action messages to be specific and actionable
+### Account signup support
+- looksLikeSignupPage() detects signup by URL pattern or field combination
+- attemptSignupIfNeeded() fills name, email, password, confirm-password, ticks terms
+- Stops before clicking Create Account — user clicks that themselves
+- If no password saved: clear message to add one in Saved Logins
 
-### Known remaining tasks
-1. Review the 6 active drafts and reject weak ones with real reasons
-2. Fix duplicate Maneuver Marketing (apps 17 and 22 — same job, one is a duplicate)
-3. For the 5 RemoteOK-URL jobs: use the new inline paste flow to add real apply URLs
-4. Run sources again to grow supply from the new sources
+### Saved Logins UI
+- Moved from hidden `<details>` in Drafts tab to visible panel
+- Renamed to "🔐 Saved Logins & Passwords" with clear RemoteOK instructions
+- "Manage saved logins" shortcut button added to My Profile tab
 
-## Node.js Path Note
+## Next Steps When Returning
 
-Node is at `/opt/homebrew/bin/node` — not on the Python subprocess PATH on macOS.
-The app now uses `_find_node()` to locate it. If form prep ever fails with "node not found",
-check this function in app.py.
+1. Go through the 5 RemoteOK jobs on Home — click Fill in application form, paste real apply URL
+2. Hit "Not interested" on the duplicate Maneuver Marketing card (apps 17 or 22)
+3. Add remoteok.com credential in ✏️ Drafts tab → Saved Logins panel
+4. Review and approve strong drafts: Happily, Trivium, Coalition Technologies
+5. Run Find Jobs sources again periodically to grow supply
 
-## Credentials And Secrets Status
+## Technical Notes
 
-- `.env` exists and is gitignored
-- MWEB SMTP and IMAP were configured earlier
-- No secret values in this file
+- Node.js: `/opt/homebrew/bin/node` — `_find_node()` in app.py handles PATH issue
+- Keychain passwords: stored under domain + username key, read by `readKeychainPassword()` in form_filler.js
+- Global skills installed in `~/.claude/` — GSD, Superpowers, Claude-Mem, Everything CC, UI/UX Pro Max, n8n-MCP, Obsidian, Awesome CC
