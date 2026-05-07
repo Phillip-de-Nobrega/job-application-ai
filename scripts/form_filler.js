@@ -1777,6 +1777,91 @@ async function attemptLoginIfNeeded(page, task, report) {
   return !stillOnPassword;
 }
 
+function looksLikeSignupPage(url, pageText) {
+  const lower = (url + " " + pageText).toLowerCase();
+  const urlLower = url.toLowerCase();
+  if (/sign[_-]?up|register|create[_-]?account|join|get[_-]?started/.test(urlLower)) return true;
+  const hasPasswordConfirm = /confirm password|repeat password|password again|verify password/.test(lower);
+  const hasNameField = /\bfirst name\b|\bfull name\b|\byour name\b/.test(lower);
+  if (hasPasswordConfirm && hasNameField) return true;
+  return false;
+}
+
+async function attemptSignupIfNeeded(page, task, report) {
+  const url = page.url();
+  let pageText = "";
+  try {
+    pageText = await page.locator("body").innerText({ timeout: 3000 }).catch(() => "");
+  } catch (e) {}
+  if (!looksLikeSignupPage(url, pageText)) return false;
+
+  const credential = task.site_credential || {};
+  const profile = task.profile || {};
+  const password = readKeychainPassword(credential);
+
+  report.login = { status: "signup-detected", login_url: url };
+
+  if (!password) {
+    report.login.status = "signup-needs-password";
+    record(report.review_fields, {
+      prompt: "Account signup",
+      reason: `This page wants you to create an account. Save a password for this site in My Profile → Site Credentials, then try again and the form will be filled automatically.`
+    });
+    return false;
+  }
+
+  const email = credential.username || profile.email || "";
+  const name = splitName(profile.full_name);
+
+  // Fill name fields
+  await fillByLabels(page, [/first name/i, /given name/i], name.first, "signup first name", report);
+  await fillByLabels(page, [/last name/i, /surname/i, /family name/i], name.last, "signup last name", report);
+  await fillByLabels(page, [/full name/i, /^name$/i, /your name/i], profile.full_name, "signup full name", report);
+
+  // Fill email
+  await fillByLabels(page, [/email/i], email, "signup email", report);
+  await fillBySelectors(page, ['input[type="email"]', 'input[name*="email" i]', 'input[id*="email" i]'], email, "signup email selector", report);
+
+  // Fill password fields
+  const passwordFields = page.locator('input[type="password"]');
+  const passwordCount = await passwordFields.count().catch(() => 0);
+  for (let i = 0; i < passwordCount; i++) {
+    try {
+      const field = passwordFields.nth(i);
+      if (await isVisible(field)) {
+        await field.fill(password, { timeout: 5000 });
+        record(report.filled_fields, { prompt: i === 0 ? "signup password" : "signup confirm password", value: "[saved in Keychain]", kind: "login" });
+      }
+    } catch (e) {}
+  }
+
+  // Tick terms/privacy checkboxes — flagged for review
+  const checkboxes = page.locator('input[type="checkbox"]');
+  const checkboxCount = await checkboxes.count().catch(() => 0);
+  for (let i = 0; i < checkboxCount; i++) {
+    try {
+      const cb = checkboxes.nth(i);
+      if (!(await isVisible(cb))) continue;
+      const label = await cb.evaluate(node => {
+        const id = node.id;
+        const labelEl = id ? document.querySelector(`label[for="${id}"]`) : null;
+        return (labelEl?.textContent || node.closest("label")?.textContent || node.getAttribute("aria-label") || "").toLowerCase();
+      }).catch(() => "");
+      if (/terms|privacy|agree|consent|gdpr|newsletter/.test(label)) {
+        await cb.check({ timeout: 3000 }).catch(() => {});
+        record(report.review_fields, { prompt: `Checkbox: ${label}`, reason: "Auto-ticked — review this agreement before creating the account." });
+      }
+    } catch (e) {}
+  }
+
+  report.login.status = "signup-filled";
+  record(report.review_fields, {
+    prompt: "Create account",
+    reason: "All signup details have been filled in. Review the fields, then click the Create Account / Sign Up button yourself."
+  });
+  return true;
+}
+
 async function clickSafeContinue(page, report, platform) {
   const progressPatterns = stepPatternsForPlatform(platform);
   const submitPatterns = finalSubmitPatterns();
@@ -1942,8 +2027,9 @@ async function main() {
       if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
-    recordEvent(task, report, "login-check", "Checking whether this page needs login.");
-    await attemptLoginIfNeeded(page, task, report);
+    recordEvent(task, report, "login-check", "Checking whether this page needs login or signup.");
+    const signedUp = await attemptSignupIfNeeded(page, task, report);
+    if (!signedUp) await attemptLoginIfNeeded(page, task, report);
     await saveSessionState(context, statePath, report);
     if (!(await resolveBlockerIfPresent(page, task, report))) {
       await saveSessionState(context, statePath, report);
@@ -1964,8 +2050,9 @@ async function main() {
       if (shouldHoldBrowserOpen(report)) await page.waitForTimeout(24 * 60 * 60 * 1000);
       return;
     }
-    recordEvent(task, report, "post-apply-login-check", "Checking again for login or gated steps.");
-    await attemptLoginIfNeeded(page, task, report);
+    recordEvent(task, report, "post-apply-login-check", "Checking again for login, signup, or gated steps.");
+    const signedUpPost = await attemptSignupIfNeeded(page, task, report);
+    if (!signedUpPost) await attemptLoginIfNeeded(page, task, report);
     await saveSessionState(context, statePath, report);
     let lastFingerprint = "";
     for (let step = 1; step <= 6; step += 1) {
