@@ -9596,7 +9596,7 @@ Record:
 
     function dailyReviewApplications() {
       const DONE = new Set(["rejected", "submitted", "interview", "offer"]);
-      return state.applications.filter(app => !DONE.has(app.status)).slice(0, 5);
+      return state.applications.filter(app => !DONE.has(app.status));
     }
 
     function appJob(app) {
@@ -9642,40 +9642,51 @@ Record:
       const apps = dailyReviewApplications();
       if (!apps.length) {
         target.innerHTML = `
-          <p class="muted">No application drafts yet.</p>
-          <div class="actions">
-            <button class="btn primary" onclick="runDailyWorkflow()">Run today&apos;s workflow</button>
-            <button class="btn" onclick="showTab('jobs')">Review jobs</button>
+          <div class="empty-state">
+            <div class="empty-icon">✅</div>
+            <h3>All clear!</h3>
+            <p>No applications waiting for your review. Run the workflow to pull in new roles.</p>
+            <div class="actions" style="justify-content:center">
+              <button class="btn primary" onclick="runDailyWorkflow()">Run today&apos;s workflow</button>
+              <button class="btn" onclick="showTab('discover')">Find Jobs</button>
+            </div>
           </div>
         `;
         return;
       }
-      target.innerHTML = apps.map(app => {
+      const batchControls = apps.length > 1 ? `
+        <div class="actions" style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)">
+          <strong>${apps.length} application${apps.length === 1 ? "" : "s"} to review</strong>
+          <button class="btn" onclick="skipAllDailyReview()" style="margin-left:auto">Skip all</button>
+        </div>
+      ` : "";
+      target.innerHTML = batchControls + apps.map(app => {
         const job = appJob(app);
-        const missing = missingApplicationItems(app);
-        const blockerCount = missing.filter(item => !item.includes("if available")).length;
-        const statusClass = blockerCount ? "bad" : missing.length ? "muted" : "ok";
         const concerns = (job.concerns || "").trim();
+        const score = job.score ?? "n/a";
+        const location = app.location || job.location || "Location not listed";
         return `
-          <div class="reminder" id="daily-card-${app.id}">
-            <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
-            <div class="meta">Status: ${escapeHtml(app.status)} - job score ${escapeHtml(job.score ?? "n/a")} - quality ${escapeHtml(app.quality_score || 0)} - ${escapeHtml(app.location || "Location not listed")}</div>
-            ${app.recommended_cv_version ? `<div><span class="tag">${escapeHtml(app.recommended_cv_version)}</span></div>` : ""}
-            <p class="${statusClass}">${escapeHtml(nextApplicationAction(app))}</p>
-            <div>
-              ${missing.length ? missing.slice(0, 7).map(item => `<span class="tag">${escapeHtml(item)}</span>`).join("") : `<span class="tag">complete enough to prepare</span>`}
+          <div class="reminder" id="daily-card-${app.id}" style="margin-bottom:12px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+              <div>
+                <h3 style="margin-bottom:4px">${escapeHtml(app.company)}</h3>
+                <div style="font-weight:500;margin-bottom:4px">${escapeHtml(app.title)}</div>
+                <div class="meta">${escapeHtml(location)} &nbsp;·&nbsp; Score ${escapeHtml(String(score))}</div>
+              </div>
+              <button class="btn" style="flex-shrink:0;background:var(--soft);color:var(--muted);border-color:var(--line);min-width:unset;padding:4px 10px;font-size:12px" onclick="notInterestedFromDashboard(${app.id})" title="Remove this role">✕ Remove</button>
             </div>
-            ${concerns ? `<details><summary>Fit concerns</summary><pre>${escapeHtml(concerns)}</pre></details>` : ""}
-            <div class="actions">
-              <button class="btn primary" onclick="selectApplication(${app.id})">Review draft</button>
-              ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">Open job</a>` : ""}
-              <button class="btn" onclick="prepareApplicationFromDashboard(${app.id})"><i data-lucide="external-link"></i> Fill in application form</button>
+            ${concerns ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Fit concerns</summary><pre style="margin-top:6px;font-size:12px">${escapeHtml(concerns)}</pre></details>` : ""}
+            ${isBoardPrepBlockedApp(app) ? `<p class="muted" style="font-size:12px;margin-top:8px">Click 'Fill in application form' — the tool will find the real apply link automatically.</p>` : ""}
+            <div class="actions" style="margin-top:10px">
+              <button class="btn primary" onclick="prepareApplicationFromDashboard(${app.id})"><i data-lucide="external-link"></i> Fill in application form</button>
               <button class="btn warn" onclick="markApplicationSubmittedFromDashboard(${app.id})">I applied for this</button>
-              <button class="btn" style="background:var(--soft);color:var(--muted);border-color:var(--line)" onclick="notInterestedFromDashboard(${app.id})">Not interested</button>
+              <button class="btn" onclick="selectApplication(${app.id})">Edit draft</button>
+              ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer" style="font-size:12px">Open job</a>` : ""}
             </div>
           </div>
         `;
       }).join("");
+      if (window.lucide) lucide.createIcons();
     }
 
     function followUpReminders() {
@@ -11524,6 +11535,24 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         return;
       }
       await prepareApplicationForm();
+      window.scrollTo({top: scrollY, behavior: "instant"});
+    }
+
+    async function skipAllDailyReview() {
+      const apps = dailyReviewApplications();
+      if (!apps.length) return;
+      if (!confirm(`Remove all ${apps.length} pending applications and pull in replacements?`)) return;
+      const scrollY = window.scrollY;
+      for (const app of apps) {
+        try {
+          await api("/api/applications/reject-and-replace", {
+            method: "POST",
+            body: JSON.stringify({id: app.id, reason: "not interested", notes: ""})
+          });
+        } catch (e) {}
+      }
+      message(`Removed ${apps.length} applications. New ones will appear as sources run.`);
+      await load();
       window.scrollTo({top: scrollY, behavior: "instant"});
     }
 
