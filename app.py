@@ -11518,13 +11518,14 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
     }
 
     async function prepareApplicationFromDashboard(id) {
+      const scrollY = window.scrollY;
       selectApplication(id, false);
       if (isBoardPrepBlockedApp(selectedApplication)) {
         showInlineApplyUrlPrompt(id, selectedApplication?.url || "");
         return;
       }
       await prepareApplicationForm();
-      showTab("applications");
+      window.scrollTo({top: scrollY, behavior: "instant"});
     }
 
     async function notInterestedFromDashboard(id) {
