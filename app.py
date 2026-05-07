@@ -11530,6 +11530,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
     async function notInterestedFromDashboard(id) {
       const app = (state.applications || []).find(a => Number(a.id) === Number(id));
       if (!app) return;
+      const scrollY = window.scrollY;
       const result = await api("/api/applications/reject-and-replace", {
         method: "POST",
         body: JSON.stringify({id, reason: "not interested", notes: ""})
@@ -11539,6 +11540,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
         ? `Removed. Pulled in ${replacements} replacement${replacements === 1 ? "" : "s"}.`
         : "Removed. No replacement available right now — run Find Jobs to bring in more.");
       await load();
+      window.scrollTo({top: scrollY, behavior: "instant"});
     }
 
     async function prepareApplicationCard(id) {
@@ -11580,9 +11582,10 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
     }
 
     async function markApplicationSubmittedFromDashboard(id) {
+      const scrollY = window.scrollY;
       selectApplication(id, false);
       await markApplicationSubmitted();
-      showTab("applications");
+      window.scrollTo({top: scrollY, behavior: "instant"});
     }
 
     async function saveEmailConfig() {
