@@ -4690,6 +4690,78 @@ def is_board_prep_blocked_url(url: str) -> bool:
     return False
 
 
+ATS_APPLY_HOSTS = [
+    "boards.greenhouse.io",
+    "jobs.lever.co",
+    "ashbyhq.com",
+    "jobs.smartrecruiters.com",
+    "jobvite.com",
+    "myworkdayjobs.com",
+    "icims.com",
+    "taleo.net",
+    "breezy.hr",
+    "recruitee.com",
+    "apply.workable.com",
+    "careers.smartrecruiters.com",
+]
+
+
+def resolve_board_apply_url(conn: sqlite3.Connection, job_id: int) -> dict[str, Any]:
+    """
+    For board listing URLs (e.g. RemoteOK), fetch the page and extract the real
+    company or ATS apply URL, then save it back to the job record.
+    """
+    job = row_to_dict(conn.execute("select * from jobs where id=?", (job_id,)).fetchone())
+    if not job:
+        return {"ok": False, "error": "Job not found."}
+    current_url = str(job.get("url") or "")
+    if not is_board_prep_blocked_url(current_url):
+        return {"ok": True, "url": current_url, "changed": False}
+
+    # Try raw_json first — some APIs include the real apply URL
+    raw = {}
+    try:
+        raw = json.loads(str(job.get("raw_json") or "{}"))
+    except Exception:
+        pass
+    for key in ("apply_url", "applyUrl", "applicationUrl", "externalUrl"):
+        candidate = str(raw.get(key) or "")
+        if candidate and candidate.startswith("http") and not is_board_prep_blocked_url(candidate):
+            conn.execute("update jobs set url=?, updated_at=? where id=?", (candidate, now_iso(), job_id))
+            conn.commit()
+            return {"ok": True, "url": candidate, "changed": True}
+
+    # Fetch the listing page and look for external apply links
+    try:
+        status, body, _ = fetch_url(current_url, timeout=15)
+    except Exception as exc:
+        return {"ok": False, "error": f"Could not fetch listing page: {exc}"}
+    if status >= 400:
+        return {"ok": False, "error": f"Listing page returned HTTP {status}."}
+
+    # Extract all hrefs from the page
+    found: list[str] = []
+    for href_match in re.finditer(r'href=["\']([^"\']{10,})["\']', body):
+        href = href_match.group(1)
+        if not href.startswith("http"):
+            continue
+        parsed = urllib.parse.urlparse(href)
+        host = parsed.netloc.lower().replace("www.", "")
+        if any(ats in host for ats in ATS_APPLY_HOSTS):
+            found.append(href)
+        elif any(kw in href.lower() for kw in ["/apply", "/application", "/job-application"]):
+            if "remoteok.com" not in href and "linkedin.com" not in href and "indeed.com" not in href:
+                found.append(href)
+
+    if found:
+        best = found[0]
+        conn.execute("update jobs set url=?, updated_at=? where id=?", (best, now_iso(), job_id))
+        conn.commit()
+        return {"ok": True, "url": best, "changed": True}
+
+    return {"ok": False, "error": "Could not find a direct apply link on this listing page. Please paste it manually."}
+
+
 def is_useful_company_url(url: str) -> bool:
     parsed = urllib.parse.urlparse(url)
     host = parsed.netloc.lower().replace("www.", "")
@@ -7324,6 +7396,20 @@ class AppHandler(BaseHTTPRequestHandler):
                     task_path = create_form_fill_smoke_task(conn)
                 pid = launch_form_filler(task_path)
                 self.json({"ok": True, "pid": pid, "task": str(task_path)})
+            elif parsed.path == "/api/jobs/resolve-apply-url":
+                job_id = int(data.get("job_id") or data.get("id") or 0)
+                with connect() as conn:
+                    result = resolve_board_apply_url(conn, job_id)
+                self.json({**result, "ok": result.get("ok", False)})
+            elif parsed.path == "/api/jobs/update-url":
+                job_id = int(data.get("job_id") or data.get("id") or 0)
+                new_url = normalize_space(str(data.get("url") or ""))
+                if not job_id or not new_url:
+                    raise RuntimeError("job_id and url are required.")
+                with connect() as conn:
+                    conn.execute("update jobs set url=?, updated_at=? where id=?", (new_url, now_iso(), job_id))
+                    conn.commit()
+                self.json({"ok": True, "url": new_url})
             elif parsed.path == "/api/email/config":
                 updates = {
                     "JOB_AI_SMTP_HOST": str(data.get("host", "smtp.mweb.co.za")),
@@ -9513,7 +9599,7 @@ Record:
       const missing = missingApplicationItems(app);
       const requiredDraftMissing = !app.cover_letter || !app.answers || !app.follow_up;
       if (isBoardPrepBlockedApp(app)) {
-        return "Open the draft, find the company's direct job or apply URL, paste it into the Job URL field, and save — then Prepare form will work.";
+        return "Click 'Fill in application form' — the tool will automatically find the real apply link for you.";
       }
       if (app.status === "submitted" && app.next_follow_up && !app.follow_up_sent_at && daysUntil(app.next_follow_up) <= 0) {
         return "Send due follow-up.";
@@ -9547,7 +9633,7 @@ Record:
         const statusClass = blockerCount ? "bad" : missing.length ? "muted" : "ok";
         const concerns = (job.concerns || "").trim();
         return `
-          <div class="reminder">
+          <div class="reminder" id="daily-card-${app.id}">
             <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
             <div class="meta">Status: ${escapeHtml(app.status)} - job score ${escapeHtml(job.score ?? "n/a")} - quality ${escapeHtml(app.quality_score || 0)} - ${escapeHtml(app.location || "Location not listed")}</div>
             ${app.recommended_cv_version ? `<div><span class="tag">${escapeHtml(app.recommended_cv_version)}</span></div>` : ""}
@@ -9558,9 +9644,10 @@ Record:
             ${concerns ? `<details><summary>Fit concerns</summary><pre>${escapeHtml(concerns)}</pre></details>` : ""}
             <div class="actions">
               <button class="btn primary" onclick="selectApplication(${app.id})">Review draft</button>
-              ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">${isBoardPrepBlockedApp(app) ? "Find apply URL" : "Open job"}</a>` : ""}
-              ${!isBoardPrepBlockedApp(app) ? `<button class="btn" onclick="prepareApplicationFromDashboard(${app.id})">Fill in application form</button>` : ""}
+              ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">Open job</a>` : ""}
+              <button class="btn" onclick="prepareApplicationFromDashboard(${app.id})"><i data-lucide="external-link"></i> Fill in application form</button>
               <button class="btn warn" onclick="markApplicationSubmittedFromDashboard(${app.id})">I applied for this</button>
+              <button class="btn" style="background:var(--soft);color:var(--muted);border-color:var(--line)" onclick="notInterestedFromDashboard(${app.id})">Not interested</button>
             </div>
           </div>
         `;
@@ -10167,7 +10254,7 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
             ${app.form_prep_started_at ? `<span class="tag">form prep ${escapeHtml(app.form_prep_report?.status || "started")}</span>` : ""}
             ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
           </div>
-          ${isBoardPrepBlockedApp(app) ? `<p class="muted">Needs a direct company/apply URL — open the draft, update the Job URL field, then form prep will work.</p>` : ""}
+          ${isBoardPrepBlockedApp(app) ? `<p class="muted">Click 'Fill in application form' — the tool will find the real apply link automatically.</p>` : ""}
           <div class="actions">
             <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
             <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
@@ -11370,14 +11457,63 @@ Notes: ${escapeHtml(item.notes || "")}</pre>
       await load();
     }
 
+    function showInlineApplyUrlPrompt(appId, jobUrl) {
+      const card = document.getElementById(`daily-card-${appId}`);
+      if (!card) return;
+      if (card.querySelector(".apply-url-prompt")) return;
+      if (jobUrl) window.open(jobUrl, "_blank", "noreferrer");
+      const prompt = document.createElement("div");
+      prompt.className = "apply-url-prompt notice";
+      prompt.style.marginTop = "10px";
+      prompt.innerHTML = `
+        <strong>Copy the Apply URL from the job listing that just opened, then paste it below:</strong>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <input id="apply-url-input-${appId}" type="url" placeholder="https://company.com/apply/..." style="flex:1">
+          <button class="btn primary" onclick="submitInlineApplyUrl(${appId})">Save &amp; launch</button>
+          <button class="btn" onclick="this.closest('.apply-url-prompt').remove()">Cancel</button>
+        </div>
+      `;
+      card.appendChild(prompt);
+      document.getElementById(`apply-url-input-${appId}`)?.focus();
+    }
+
+    async function submitInlineApplyUrl(appId) {
+      const input = document.getElementById(`apply-url-input-${appId}`);
+      const url = (input?.value || "").trim();
+      if (!url || !url.startsWith("http")) { message("Please paste a valid URL starting with https://", "bad"); return; }
+      const app = (state.applications || []).find(a => Number(a.id) === Number(appId));
+      if (!app) return;
+      await api("/api/applications/save", {method: "POST", body: JSON.stringify({id: appId, job_url_override: url})});
+      await api("/api/jobs/update-url", {method: "POST", body: JSON.stringify({job_id: app.job_id, url})});
+      message("Apply link saved — launching form now.");
+      await load();
+      selectApplication(appId, false);
+      await prepareApplicationForm();
+      showTab("applications");
+    }
+
     async function prepareApplicationFromDashboard(id) {
       selectApplication(id, false);
       if (isBoardPrepBlockedApp(selectedApplication)) {
-        message("This draft still points to a job board listing page — Prepare form can't run on it. Open the listing, find the company's direct apply URL, then update it in the draft editor.", "bad");
+        showInlineApplyUrlPrompt(id, selectedApplication?.url || "");
         return;
       }
       await prepareApplicationForm();
       showTab("applications");
+    }
+
+    async function notInterestedFromDashboard(id) {
+      const app = (state.applications || []).find(a => Number(a.id) === Number(id));
+      if (!app) return;
+      const result = await api("/api/applications/reject-and-replace", {
+        method: "POST",
+        body: JSON.stringify({id, reason: "not interested", notes: ""})
+      });
+      const replacements = result.replacement_application_ids?.length || 0;
+      message(replacements
+        ? `Removed. Pulled in ${replacements} replacement${replacements === 1 ? "" : "s"}.`
+        : "Removed. No replacement available right now — run Find Jobs to bring in more.");
+      await load();
     }
 
     async function prepareApplicationCard(id) {
