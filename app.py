@@ -8552,6 +8552,7 @@ INDEX_HTML = r"""<!doctype html>
           <button class="btn primary" onclick="saveProfile()">Save my profile</button>
           <button class="btn" onclick="extractCv()">Read my CV</button>
           <button class="btn" onclick="extractWritingSample()">Analyse my writing style</button>
+          <button class="btn" onclick="showTab('applications');setTimeout(()=>document.getElementById('siteCredentialPanel')?.scrollIntoView({behavior:'smooth'}),100)"><i data-lucide="key"></i> Manage saved logins</button>
         </div>
       </div>
     </section>
@@ -8774,25 +8775,28 @@ INDEX_HTML = r"""<!doctype html>
             </div>
             <div id="applicationList"></div>
           </div>
-          <div class="panel">
-            <details>
-              <summary><strong>Saved site credentials</strong></summary>
-              <p class="muted">Saved locally. Metadata stays in this app database, and passwords stay in macOS Keychain. Use the site domain that the login page or ATS actually uses.</p>
-              <input id="credential_id" type="hidden">
-              <div class="row">
-                <div><label>Domain</label><input id="credential_domain" placeholder="linkedin.com"></div>
-                <div><label>Login URL</label><input id="credential_login_url" placeholder="https://www.linkedin.com/login"></div>
-                <div><label>Username / email</label><input id="credential_username" placeholder="your@email.com"></div>
-                <div><label>Password</label><input id="credential_password" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing password"></div>
-              </div>
-              <label>Notes</label><textarea id="credential_notes" placeholder="Optional notes about MFA, which flow this is for, or when to use it."></textarea>
-              <label><input id="credential_enabled" type="checkbox" style="width:auto" checked> Enabled for automatic login attempts</label>
-              <div class="actions">
-                <button class="btn primary" onclick="saveSiteCredential()">Save credential</button>
-                <button class="btn" onclick="clearSiteCredentialForm()">New credential</button>
-              </div>
-              <div id="siteCredentialList"></div>
-            </details>
+          <div class="panel" id="siteCredentialPanel">
+            <h2>🔐 Saved Logins & Passwords</h2>
+            <p class="section-intro">Save a login for any job site here and the tool will fill it in automatically when you apply. Passwords are stored securely in macOS Keychain — not in the database.</p>
+            <div class="notice ok" style="margin-bottom:12px">
+              <strong>To apply on RemoteOK or similar sites</strong> — add <code>remoteok.com</code> as a domain below with your email and a password. The form filler will then create or log into your account automatically before filling the application.
+            </div>
+            <input id="credential_id" type="hidden">
+            <div class="row">
+              <div><label>Website domain</label><input id="credential_domain" placeholder="remoteok.com"></div>
+              <div><label>Login page URL <span class="muted">(optional)</span></label><input id="credential_login_url" placeholder="https://remoteok.com/sign-up"></div>
+            </div>
+            <div class="row">
+              <div><label>Your email / username</label><input id="credential_username" placeholder="Phillip2002@mweb.co.za"></div>
+              <div><label>Password</label><input id="credential_password" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing"></div>
+            </div>
+            <label>Notes <span class="muted">(optional)</span></label><textarea id="credential_notes" placeholder="e.g. worker account, used for job applications" style="min-height:60px"></textarea>
+            <label><input id="credential_enabled" type="checkbox" style="width:auto" checked> Use this automatically when filling forms</label>
+            <div class="actions">
+              <button class="btn primary" onclick="saveSiteCredential()"><i data-lucide="save"></i> Save login</button>
+              <button class="btn" onclick="clearSiteCredentialForm()">Add another</button>
+            </div>
+            <div id="siteCredentialList" style="margin-top:12px"></div>
           </div>
         </div>
         <div class="panel">
