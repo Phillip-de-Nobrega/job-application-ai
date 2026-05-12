@@ -8500,6 +8500,37 @@ SWIPE_HTML = """<!DOCTYPE html>
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  /* Apply sheet */
+  .apply-sheet {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: #1c1c1e;
+    border-radius: 20px 20px 0 0;
+    padding: 12px 20px 48px;
+    transform: translateY(100%);
+    transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+    z-index: 200;
+    box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
+  }
+  .apply-sheet.show { transform: translateY(0); }
+  .sheet-handle {
+    width: 36px; height: 4px;
+    background: #444; border-radius: 2px;
+    margin: 0 auto 16px;
+  }
+  .sheet-co { font-size: 12px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .sheet-ttl { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 20px; line-height: 1.3; }
+  .sheet-btns { display: flex; gap: 10px; }
+  .sheet-apply-btn {
+    flex: 1; background: var(--like); color: #fff;
+    border: none; padding: 14px; border-radius: 14px;
+    font-size: 16px; font-weight: 700; cursor: pointer;
+  }
+  .sheet-later-btn {
+    background: #2a2a2a; color: #aaa;
+    border: none; padding: 14px 20px; border-radius: 14px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
   /* Toast notification */
   #toast {
     position: fixed;
@@ -8559,6 +8590,15 @@ SWIPE_HTML = """<!DOCTYPE html>
     <button class="action-btn btn-like" onclick="swipeAction('like')" title="Shortlist">♥</button>
   </div>
 </div>
+<div id="apply-sheet" class="apply-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-co" id="sheet-co"></div>
+  <div class="sheet-ttl" id="sheet-ttl"></div>
+  <div class="sheet-btns">
+    <button class="sheet-apply-btn" onclick="applyNow()">Apply Now →</button>
+    <button class="sheet-later-btn" onclick="hideApplySheet()">Later</button>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -8566,6 +8606,8 @@ let jobs = [];
 let currentIndex = 0;
 let likedCount = 0;
 let isDragging = false;
+let currentApplyJob = null;
+let sheetTimer = null;
 let startX = 0, startY = 0, lastX = 0, lastY = 0;
 let cardEl = null;
 
@@ -8753,9 +8795,28 @@ async function doLike(card) {
   await api('/api/jobs/status', { id: job.id, status: 'shortlisted' });
   likedCount++;
   likedBar.classList.add('show');
-  likedBar.textContent = `♥ ${likedCount} liked — tap to review & apply ↗`;
-  toast('♥ Shortlisted!');
+  likedBar.textContent = `♥ ${likedCount} saved`;
+  showApplySheet(job);
   advance();
+}
+
+function showApplySheet(job) {
+  currentApplyJob = job;
+  document.getElementById('sheet-co').textContent = job.company || '';
+  document.getElementById('sheet-ttl').textContent = job.title || '';
+  document.getElementById('apply-sheet').classList.add('show');
+  clearTimeout(sheetTimer);
+  sheetTimer = setTimeout(hideApplySheet, 7000);
+}
+
+function hideApplySheet() {
+  document.getElementById('apply-sheet').classList.remove('show');
+  currentApplyJob = null;
+}
+
+function applyNow() {
+  if (currentApplyJob && currentApplyJob.url) window.open(currentApplyJob.url, '_blank');
+  hideApplySheet();
 }
 
 async function doNope(card) {
@@ -8956,3890 +9017,724 @@ def search_links() -> dict[str, str]:
 INDEX_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Job Application AI</title>
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <style>
-    /* UI UX Pro Max — Swiss Modernism 2.0 + Job Board/Recruitment palette */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    :root {
-      color-scheme: light;
-      /* Primary palette — professional blue */
-      --ink:      #0C4A6E;
-      --muted:    #64748B;
-      --line:     #BAE6FD;
-      --soft:     #F0F9FF;
-      --panel:    #FFFFFF;
-      --accent:   #0369A1;
-      --accent-2: #D97706;
-      --danger:   #DC2626;
-      --good:     #16A34A;
-      /* Extended */
-      --accent-hover:  #0284C7;
-      --accent-light:  #E0F2FE;
-      --accent-2-bg:   #FFFBEB;
-      --danger-bg:     #FEF2F2;
-      --good-bg:       #F0FDF4;
-      /* Spacing — 8px base unit */
-      --sp-1: 8px;
-      --sp-2: 16px;
-      --sp-3: 24px;
-      --radius: 8px;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
-      color: var(--ink);
-      background: var(--soft);
-      line-height: 1.5;
-    }
-    header {
-      position: sticky;
-      top: 0;
-      z-index: 5;
-      background: var(--panel);
-      border-bottom: 1px solid var(--line);
-      box-shadow: 0 1px 4px rgba(3,105,161,0.06);
-    }
-    .topbar {
-      max-width: 1320px;
-      margin: 0 auto;
-      padding: 12px 20px;
-      display: grid;
-      gap: 12px;
-    }
-    .nav-stack {
-      display: grid;
-      gap: 8px;
-      justify-items: start;
-    }
-    h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; color: var(--accent); }
-    .sub { color: var(--muted); font-size: 12px; }
-    nav { display: flex; gap: 6px; flex-wrap: wrap; }
-    .nav-secondary { display: none; }
-    .nav-secondary.open { display: flex; }
-    nav button, .btn {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      color: var(--ink);
-      padding: 7px 14px;
-      border-radius: var(--radius);
-      cursor: pointer;
-      font: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      min-height: 36px;
-      transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
-    }
-    nav button:hover, .btn:hover {
-      background: var(--accent-light);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-    nav button.active, .btn.primary {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: #fff;
-      font-weight: 600;
-      box-shadow: 0 1px 4px rgba(3,105,161,0.25);
-    }
-    nav button.active:hover, .btn.primary:hover {
-      background: var(--accent-hover);
-      border-color: var(--accent-hover);
-      color: #fff;
-    }
-    nav button.ghost-active {
-      border-color: var(--accent);
-      color: var(--accent);
-      background: var(--accent-light);
-      font-weight: 600;
-    }
-    .btn.warn {
-      background: var(--accent-2);
-      border-color: var(--accent-2);
-      color: #fff;
-      font-weight: 600;
-    }
-    .btn.warn:hover { background: #B45309; border-color: #B45309; color: #fff; }
-    .btn:disabled, .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
-    main {
-      max-width: 1320px;
-      margin: 0 auto;
-      padding: 20px;
-    }
-    /* Nav padding offset for sticky header (UX Pro Max: sticky-nav rule) */
-    main { padding-top: var(--sp-3); }
-    section { display: none; }
-    section.active { display: block; }
-    .grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
-      gap: 16px;
-      align-items: start;
-    }
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 16px;
-      box-shadow: 0 1px 3px rgba(3,105,161,0.05);
-    }
-    .panel + .panel { margin-top: 16px; }
-    h2 { margin: 0 0 12px; font-size: 17px; font-weight: 700; letter-spacing: -0.2px; }
-    h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
-    label {
-      display: block;
-      font-weight: 600;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-      color: var(--muted);
-      margin: 14px 0 6px;
-    }
-    input, select, textarea {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 9px 12px;
-      font: inherit;
-      font-size: 14px;
-      background: var(--panel);
-      color: var(--ink);
-      transition: border-color 0.12s, box-shadow 0.12s;
-    }
-    input:focus, select:focus, textarea:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(3,105,161,0.12);
-    }
-    textarea { min-height: 120px; resize: vertical; }
-    .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
-    .jobs { display: grid; gap: 10px; }
-    .job {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: var(--radius);
-      padding: 14px;
-      display: grid;
-      grid-template-columns: 88px minmax(0, 1fr);
-      gap: 12px;
-      transition: box-shadow 0.12s;
-    }
-    .job:hover { box-shadow: 0 2px 8px rgba(3,105,161,0.10); }
-    .score {
-      width: 72px;
-      height: 72px;
-      display: grid;
-      place-items: center;
-      border-radius: 50%;
-      border: 5px solid var(--accent);
-      font-size: 20px;
-      font-weight: 800;
-      color: var(--accent);
-      background: var(--accent-light);
-    }
-    .score.low { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
-    .score.mid { border-color: var(--accent-2); color: var(--accent-2); background: var(--accent-2-bg); }
-    .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; line-height: 1.6; }
-    .tag {
-      display: inline-flex;
-      align-items: center;
-      min-height: 22px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--accent-light);
-      border: 1px solid var(--line);
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--accent);
-      margin-right: 4px;
-      margin-top: 6px;
-    }
-    pre {
-      white-space: pre-wrap;
-      background: var(--soft);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 12px;
-      overflow: auto;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    .notice {
-      border-left: 3px solid var(--accent-2);
-      background: var(--accent-2-bg);
-      padding: 12px 14px;
-      margin-bottom: 16px;
-      border-radius: 0 var(--radius) var(--radius) 0;
-      color: #78350F;
-      font-size: 13px;
-    }
-    .notice.bad {
-      border-left-color: var(--danger);
-      background: var(--danger-bg);
-      color: #991B1B;
-    }
-    .notice.ok {
-      border-left-color: var(--good);
-      background: var(--good-bg);
-      color: #14532D;
-    }
-    .reminder {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: var(--radius);
-      padding: 14px;
-      margin-top: 10px;
-      box-shadow: 0 1px 3px rgba(3,105,161,0.04);
-    }
-    .metric-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-    .metric {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: var(--radius);
-      padding: 14px;
-      min-height: 82px;
-      box-shadow: 0 1px 3px rgba(3,105,161,0.04);
-    }
-    .metric strong {
-      display: block;
-      font-size: 26px;
-      font-weight: 700;
-      line-height: 1.1;
-      margin-bottom: 4px;
-      color: var(--accent);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-      background: var(--panel);
-    }
-    th, td {
-      border-bottom: 1px solid var(--line);
-      padding: 10px 8px;
-      text-align: left;
-      vertical-align: top;
-    }
-    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; background: var(--soft); }
-    tr:hover td { background: var(--soft); }
-    .ok { color: var(--good); font-weight: 600; }
-    .bad { color: var(--danger); font-weight: 600; }
-    .muted { color: var(--muted); }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .hidden { display: none; }
-    .tool-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-    .tool-card {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: var(--radius);
-      padding: 16px;
-      min-height: 130px;
-      transition: box-shadow 0.12s, border-color 0.12s;
-    }
-    .tool-card:hover { box-shadow: 0 2px 8px rgba(3,105,161,0.10); border-color: var(--accent); }
-    .tool-card h3 { font-size: 15px; margin-bottom: 6px; font-weight: 600; }
-    .hero-copy {
-      display: grid;
-      gap: 10px;
-    }
-    .workflow-list {
-      display: grid;
-      gap: 10px;
-      margin-top: 12px;
-    }
-    .workflow-step {
-      border: 1px solid var(--line);
-      background: #fff;
-      border-radius: 8px;
-      padding: 12px;
-    }
-    .workflow-step strong {
-      display: block;
-      margin-bottom: 4px;
-    }
-    /* ── Status badges ── */
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 3px 10px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-    }
-    .status-draft    { background: #F1F5F9; color: #475569; }
-    .status-ready    { background: var(--accent-light); color: var(--accent); }
-    .status-applied  { background: var(--good-bg); color: var(--good); }
-    .status-interview{ background: #F5F3FF; color: #7C3AED; }
-    .status-offer    { background: #FFF9C4; color: #92400E; }
-    .status-rejected { background: var(--danger-bg); color: var(--danger); }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Application AI</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/lucide.min.js">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0A0A0A;--surface:#141414;--surface2:#1E1E1E;--border:#2A2A2A;
+  --text:#F0F0F0;--muted:#888;--accent:#6366f1;--accent2:#818cf8;
+  --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;--blue:#3b82f6;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;overflow:hidden}
+a{color:inherit;text-decoration:none}
+button{cursor:pointer;font-family:inherit}
+input,textarea,select{font-family:inherit}
 
-    /* ── Pipeline progress bar ── */
-    .pipeline {
-      display: flex;
-      gap: 0;
-      margin-bottom: 20px;
-      border-radius: var(--radius);
-      overflow: hidden;
-      border: 1px solid var(--line);
-    }
-    .pipeline-step {
-      flex: 1;
-      padding: 10px 8px;
-      text-align: center;
-      font-size: 11px;
-      font-weight: 600;
-      background: var(--soft);
-      color: var(--muted);
-      border-right: 1px solid var(--line);
-      transition: background 0.15s;
-    }
-    .pipeline-step:last-child { border-right: none; }
-    .pipeline-step.active { background: var(--accent); color: #fff; }
-    .pipeline-step.done   { background: var(--good-bg); color: var(--good); }
-    .pipeline-step .step-num {
-      display: block;
-      font-size: 16px;
-      margin-bottom: 2px;
-    }
+/* Layout */
+#root{display:flex;height:100vh}
+#sidebar{
+  width:220px;flex-shrink:0;
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  padding:0;
+}
+#main{flex:1;overflow-y:auto;background:var(--bg)}
 
-    /* ── Queue card improvements ── */
-    .queue-card {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 16px;
-      background: var(--panel);
-      box-shadow: 0 1px 4px rgba(3,105,161,0.06);
-      transition: box-shadow 0.15s, border-color 0.15s;
-    }
-    .queue-card:hover { box-shadow: 0 3px 12px rgba(3,105,161,0.12); border-color: var(--accent); }
-    .queue-card-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 10px;
-    }
-    .queue-card-title { font-weight: 700; font-size: 15px; color: var(--ink); }
-    .queue-card-company { font-size: 13px; color: var(--muted); margin-top: 2px; }
+/* Sidebar */
+.sidebar-brand{
+  padding:20px 20px 16px;
+  font-size:18px;font-weight:800;
+  color:var(--text);letter-spacing:-0.5px;
+  border-bottom:1px solid var(--border);
+}
+.sidebar-brand span{color:var(--accent)}
+.nav-section{padding:12px 10px 4px;flex:1}
+.nav-btn{
+  display:flex;align-items:center;gap:10px;
+  width:100%;padding:10px 12px;
+  border:none;background:transparent;color:var(--muted);
+  border-radius:10px;font-size:14px;font-weight:500;
+  margin-bottom:2px;text-align:left;
+  transition:background 0.15s,color 0.15s;
+}
+.nav-btn:hover{background:var(--surface2);color:var(--text)}
+.nav-btn.active{background:var(--accent);color:#fff}
+.nav-btn .nb{margin-left:auto;background:rgba(255,255,255,0.15);padding:2px 7px;border-radius:20px;font-size:11px;font-weight:700}
+.nav-btn:not(.active) .nb{background:var(--surface2);color:var(--muted)}
+.nav-swipe{
+  display:flex;align-items:center;gap:10px;
+  width:calc(100% - 20px);margin:10px;
+  padding:11px 14px;
+  background:var(--accent);color:#fff;
+  border:none;border-radius:12px;
+  font-size:14px;font-weight:700;
+  justify-content:center;
+}
+.nav-swipe:hover{background:var(--accent2)}
+.sidebar-footer{
+  padding:12px 16px;
+  border-top:1px solid var(--border);
+  font-size:12px;color:var(--muted);
+}
 
-    /* ── Section intro text ── */
-    .section-intro {
-      color: var(--muted);
-      font-size: 13px;
-      margin: -4px 0 16px;
-      line-height: 1.6;
-    }
+/* Tab content */
+.tab{display:none;padding:32px 40px;min-height:100%}
+.tab.active{display:block}
 
-    /* ── Empty states ── */
-    .empty-state {
-      text-align: center;
-      padding: 48px 24px;
-      color: var(--muted);
-    }
-    .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
-    .empty-state h3 { color: var(--ink); margin-bottom: 8px; }
-    .empty-state p  { font-size: 13px; margin-bottom: 16px; }
+/* Section header */
+.sec-header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:28px;
+  padding-bottom:20px;
+  border-bottom:1px solid var(--border);
+}
+.sec-title{font-size:26px;font-weight:800;letter-spacing:-0.5px}
+.sec-count{
+  display:inline-block;margin-left:10px;
+  background:var(--surface2);color:var(--muted);
+  padding:3px 10px;border-radius:20px;font-size:14px;font-weight:600;
+}
+.sec-actions{display:flex;gap:10px;align-items:center}
 
-    /* ── Improved reminder cards ── */
-    .reminder { border-left: 3px solid var(--accent); }
-    .reminder h3 { color: var(--accent); }
+/* Buttons */
+.btn{
+  padding:9px 18px;border:none;border-radius:10px;
+  font-size:14px;font-weight:600;cursor:pointer;
+  transition:opacity 0.15s,transform 0.1s;
+}
+.btn:active{transform:scale(0.97)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent2)}
+.btn-ghost{background:var(--surface2);color:var(--text)}
+.btn-ghost:hover{background:var(--border)}
+.btn-danger{background:rgba(239,68,68,0.15);color:var(--red)}
+.btn-success{background:rgba(34,197,94,0.15);color:var(--green)}
+.btn-sm{padding:6px 12px;font-size:13px;border-radius:8px;border:none;font-weight:600;cursor:pointer}
 
-    /* ── Better metric numbers ── */
-    .metric .metric-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); }
-    .metric.metric-applied strong { color: var(--good); }
-    .metric.metric-queue  strong  { color: var(--accent); }
-    .metric.metric-due    strong  { color: var(--accent-2); }
+/* Empty state */
+.empty{
+  display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:80px 40px;gap:14px;text-align:center;
+}
+.empty-icon{font-size:52px}
+.empty h2{font-size:20px;font-weight:700}
+.empty p{color:var(--muted);font-size:15px;line-height:1.5}
 
-    /* ── h1 branding ── */
-    h1 span.app-tagline { font-size: 12px; font-weight: 400; color: var(--muted); display: block; margin-top: 1px; }
+/* Job grid (Queue) */
+.job-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+  gap:16px;
+}
+.jcard{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:16px;padding:20px;
+  display:flex;flex-direction:column;gap:14px;
+  transition:border-color 0.15s;
+}
+.jcard:hover{border-color:#444}
+.jcard-top{display:flex;gap:12px;align-items:flex-start}
+.jcard-avatar{
+  width:44px;height:44px;border-radius:12px;flex-shrink:0;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;font-weight:800;color:#fff;
+}
+.jcard-meta{flex:1;min-width:0}
+.jcard-company{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jcard-title{font-size:15px;font-weight:700;line-height:1.3;color:var(--text)}
+.jcard-loc{font-size:12px;color:var(--muted);margin-top:3px}
+.jcard-tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px}
+.tag-remote{background:rgba(34,197,94,0.15);color:var(--green)}
+.tag-hybrid{background:rgba(59,130,246,0.15);color:var(--blue)}
+.tag-onsite{background:rgba(245,158,11,0.15);color:var(--yellow)}
+.tag-score{background:rgba(99,102,241,0.15);color:var(--accent2)}
+.jcard-actions{display:flex;gap:8px;margin-top:auto}
+.btn-apply{
+  flex:1;background:var(--green);color:#fff;
+  border:none;padding:10px;border-radius:10px;
+  font-size:14px;font-weight:700;cursor:pointer;
+}
+.btn-apply:hover{background:#16a34a}
+.btn-remove{
+  background:var(--surface2);color:var(--muted);
+  border:none;padding:10px 14px;border-radius:10px;
+  font-size:13px;font-weight:600;cursor:pointer;
+}
 
-    /* ── Lucide icons ── */
-    nav button i, .btn i {
-      width: 14px; height: 14px;
-      display: inline-block;
-      vertical-align: middle;
-      margin-right: 5px;
-      margin-top: -2px;
-      stroke-width: 2.2px;
-    }
-    .pipeline-step i {
-      width: 20px; height: 20px;
-      display: block;
-      margin: 0 auto 4px;
-      stroke-width: 2px;
-    }
-    @media (max-width: 920px) {
-      .grid, .row, .metric-grid, .tool-grid { grid-template-columns: 1fr; }
-      .job { grid-template-columns: 1fr; }
-      .score { width: 60px; height: 60px; }
-      .pipeline { flex-wrap: wrap; }
-      .pipeline-step { flex: 1 1 30%; }
-    }
-  </style>
+/* Applied list */
+.app-list{display:flex;flex-direction:column;gap:10px}
+.app-row{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:18px 20px;
+  display:flex;align-items:center;gap:16px;
+}
+.app-row.follow-up-due{border-color:var(--yellow)}
+.status-badge{
+  font-size:11px;font-weight:700;padding:4px 10px;
+  border-radius:20px;white-space:nowrap;flex-shrink:0;
+}
+.status-submitted{background:rgba(34,197,94,0.15);color:var(--green)}
+.status-draft{background:rgba(136,136,136,0.15);color:var(--muted)}
+.status-due{background:rgba(245,158,11,0.25);color:var(--yellow)}
+.app-info{flex:1;min-width:0}
+.app-title{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-company{font-size:13px;color:var(--muted);margin-top:2px}
+.app-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0}
+.app-date{font-size:12px;color:var(--muted)}
+.app-btns{display:flex;gap:6px}
+
+/* Sources */
+.sources-list{display:flex;flex-direction:column;gap:8px;margin-bottom:32px}
+.source-row{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:14px 18px;
+  display:flex;align-items:center;gap:14px;
+}
+.source-row.disabled{opacity:0.5}
+.source-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.source-dot.on{background:var(--green)}
+.source-dot.off{background:var(--muted)}
+.source-info{flex:1;min-width:0}
+.source-name{font-size:14px;font-weight:600}
+.source-meta{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.source-actions{display:flex;gap:6px;flex-shrink:0}
+
+/* Add source form */
+.add-source-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:24px;
+}
+.add-source-card h3{font-size:16px;font-weight:700;margin-bottom:16px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-group.full{grid-column:1/-1}
+.form-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px}
+.form-input,.form-select,.form-textarea{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;padding:10px 12px;
+  color:var(--text);font-size:14px;
+  transition:border-color 0.15s;
+}
+.form-input:focus,.form-select:focus,.form-textarea:focus{
+  outline:none;border-color:var(--accent);
+}
+.form-select option{background:var(--surface2)}
+.form-textarea{resize:vertical;min-height:80px}
+
+/* Profile form */
+.profile-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:16px;padding:28px;
+  max-width:640px;
+}
+.profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.profile-grid .full{grid-column:1/-1}
+
+/* Toast */
+#toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
+  background:#1c1c1e;color:#fff;padding:10px 20px;border-radius:40px;
+  font-size:14px;font-weight:500;transition:transform 0.3s ease;
+  pointer-events:none;white-space:nowrap;z-index:999;
+  box-shadow:0 4px 24px rgba(0,0,0,0.4);
+}
+#toast.show{transform:translateX(-50%) translateY(0)}
+
+/* Spinner */
+.spinner{
+  width:20px;height:20px;border:2px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin 0.7s linear infinite;display:inline-block;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Run all progress */
+#run-progress{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:16px 20px;margin-bottom:16px;
+  font-size:14px;color:var(--muted);display:none;
+}
+#run-progress.active{display:flex;align-items:center;gap:12px}
+</style>
 </head>
 <body>
-  <header>
-    <div class="topbar">
-      <div>
-        <h1>Job Application AI <span class="app-tagline">Your personal job search assistant</span></h1>
+<div id="root">
+
+  <nav id="sidebar">
+    <div class="sidebar-brand">Job<span>Swipe</span></div>
+    <div class="nav-section">
+      <button class="nav-swipe" onclick="location.href='/swipe'">🃏 Swipe for Jobs</button>
+      <button class="nav-btn active" data-tab="queue" onclick="switchTab('queue',this)">
+        ❤️ Apply Queue <span class="nb" id="nb-queue"></span>
+      </button>
+      <button class="nav-btn" data-tab="applied" onclick="switchTab('applied',this)">
+        ✅ Applied <span class="nb" id="nb-applied"></span>
+      </button>
+      <button class="nav-btn" data-tab="sources" onclick="switchTab('sources',this)">
+        📡 Sources
+      </button>
+      <button class="nav-btn" data-tab="profile" onclick="switchTab('profile',this)">
+        👤 Profile
+      </button>
+    </div>
+    <div class="sidebar-footer" id="sidebar-status">Loading...</div>
+  </nav>
+
+  <main id="main">
+
+    <!-- QUEUE -->
+    <div id="tab-queue" class="tab active">
+      <div class="sec-header">
+        <div><span class="sec-title">Apply Queue</span><span class="sec-count" id="q-count">0</span></div>
+        <div class="sec-actions">
+          <button class="btn btn-ghost" onclick="location.href='/swipe'">+ Swipe more</button>
+        </div>
       </div>
-      <div class="nav-stack">
-        <nav class="nav-primary">
-          <button data-tab="dashboard" class="active"><i data-lucide="house"></i> Home</button>
-          <button data-tab="auto_apply_queue"><i data-lucide="clipboard-list"></i> My Queue</button>
-          <button data-tab="applications"><i data-lucide="edit-3"></i> Drafts</button>
-          <button data-tab="outreach"><i data-lucide="send"></i> Contact Companies</button>
-          <button data-tab="resume_lab"><i data-lucide="file-text"></i> My CV</button>
-          <button data-tab="profile"><i data-lucide="user"></i> My Profile</button>
-          <button data-tab="email"><i data-lucide="mail"></i> Follow-ups</button>
-          <button id="advancedToggle" type="button">More ▾</button>
-        </nav>
-        <nav id="advancedNav" class="nav-secondary">
-          <button data-tab="discover"><i data-lucide="search"></i> Find Jobs</button>
-          <button data-tab="targets"><i data-lucide="star"></i> Dream Companies</button>
-          <button data-tab="jobs"><i data-lucide="briefcase"></i> All Jobs</button>
-          <button data-tab="ats_scanner"><i data-lucide="check-circle"></i> Readiness Check</button>
-          <button data-tab="interview_prep"><i data-lucide="mic"></i> Interview Prep</button>
-          <button data-tab="auto"><i data-lucide="settings"></i> Automation</button>
-          <button data-tab="analytics"><i data-lucide="bar-chart-2"></i> My Stats</button>
-          <button data-tab="session"><i data-lucide="save"></i> Save Session</button>
-        </nav>
+      <div id="queue-body"></div>
+    </div>
+
+    <!-- APPLIED -->
+    <div id="tab-applied" class="tab">
+      <div class="sec-header">
+        <div><span class="sec-title">Applied</span><span class="sec-count" id="a-count">0</span></div>
+      </div>
+      <div id="applied-body"></div>
+    </div>
+
+    <!-- SOURCES -->
+    <div id="tab-sources" class="tab">
+      <div class="sec-header">
+        <div><span class="sec-title">Sources</span></div>
+        <div class="sec-actions">
+          <button class="btn btn-primary" onclick="runAll()">▶ Run All</button>
+        </div>
+      </div>
+      <div id="run-progress"><div class="spinner"></div><span id="run-msg">Running all sources...</span></div>
+      <div id="sources-body"></div>
+      <div class="add-source-card" style="margin-top:24px">
+        <h3>Add New Source</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input class="form-input" id="s-name" placeholder="e.g. Takealot Careers">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Type</label>
+            <select class="form-select" id="s-type" onchange="updateSourceHints()">
+              <optgroup label="ATS Boards">
+                <option value="greenhouse">Greenhouse</option>
+                <option value="lever">Lever</option>
+                <option value="ashby">Ashby</option>
+                <option value="smartrecruiters">SmartRecruiters</option>
+                <option value="recruitee">Recruitee</option>
+                <option value="workable">Workable</option>
+                <option value="teamtailor">Teamtailor</option>
+              </optgroup>
+              <optgroup label="Job Board Feeds">
+                <option value="jobicy_rss">Jobicy RSS</option>
+                <option value="remotive">Remotive</option>
+                <option value="arbeitnow">Arbeitnow</option>
+                <option value="adzuna">Adzuna SA</option>
+                <option value="indeed_rss">Indeed RSS</option>
+                <option value="weworkremotely_rss">WeWorkRemotely RSS</option>
+              </optgroup>
+              <optgroup label="Careers Pages">
+                <option value="public">Public Careers Page</option>
+                <option value="direct">Direct URL</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" id="s-token-label">Board Token / URL</label>
+            <input class="form-input" id="s-token" placeholder="e.g. takealot">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Search Query (optional)</label>
+            <input class="form-input" id="s-query" placeholder="e.g. marketing">
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <button class="btn btn-primary" onclick="addSource()">Add Source</button>
+        </div>
       </div>
     </div>
-  </header>
 
-  <main>
-    <div id="message"></div>
-
-    <section id="dashboard" class="active">
-      <div class="notice">
-        This tool helps you find jobs, write applications, and track follow-ups. It prepares everything for you — but <strong>you always click the final submit button yourself</strong>.
-      </div>
-      <div class="pipeline">
-        <div class="pipeline-step">
-          <i data-lucide="search"></i>Find Jobs
-        </div>
-        <div class="pipeline-step">
-          <i data-lucide="edit-3"></i>Write Draft
-        </div>
-        <div class="pipeline-step">
-          <i data-lucide="clipboard"></i>Fill Form
-        </div>
-        <div class="pipeline-step">
-          <i data-lucide="send"></i>You Submit
-        </div>
-        <div class="pipeline-step">
-          <i data-lucide="mail"></i>Follow Up
-        </div>
-        <div class="pipeline-step">
-          <i data-lucide="mic"></i>Interview
+    <!-- PROFILE -->
+    <div id="tab-profile" class="tab">
+      <div class="sec-header">
+        <div><span class="sec-title">Profile</span></div>
+        <div class="sec-actions">
+          <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
         </div>
       </div>
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Today</h2>
-            <div id="summary"></div>
-            <div id="workflowGuide"></div>
+      <div class="profile-card">
+        <div class="profile-grid">
+          <div class="form-group">
+            <label class="form-label">Full Name</label>
+            <input class="form-input" id="p-full_name">
           </div>
-          <div class="panel">
-            <h2>Daily Review</h2>
-            <div id="dailyReview"></div>
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input class="form-input" id="p-email" type="email">
           </div>
-        </div>
-        <div class="panel">
-          <h2>Useful Shortcuts</h2>
-          <div id="searchLinks"></div>
-          <div style="margin-top:18px">
-            <h2>Source Health</h2>
-            <div id="dashboardSourceHealth"></div>
+          <div class="form-group">
+            <label class="form-label">Phone</label>
+            <input class="form-input" id="p-phone">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Location</label>
+            <input class="form-input" id="p-location">
+          </div>
+          <div class="form-group">
+            <label class="form-label">LinkedIn URL</label>
+            <input class="form-input" id="p-linkedin_url">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Portfolio URL</label>
+            <input class="form-input" id="p-portfolio_url">
+          </div>
+          <div class="form-group full">
+            <label class="form-label">Salary Expectation</label>
+            <input class="form-input" id="p-salary_expectation" placeholder="e.g. R22,000/month">
+          </div>
+          <div class="form-group full">
+            <label class="form-label">CV Text (paste your CV content here)</label>
+            <textarea class="form-textarea" id="p-cv_text" rows="12" style="min-height:200px"></textarea>
           </div>
         </div>
       </div>
-    </section>
+    </div>
 
-    <section id="auto_apply_queue">
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Review &amp; Approve</h2>
-            <p class="section-intro">These are the jobs waiting for your decision. <strong>Approve</strong> the ones you like, <strong>Skip</strong> the ones you don't, or <strong>Hold</strong> ones you're unsure about. Once approved, click <em>Fill in application form</em> to get started.</p>
-            <div class="actions">
-              <button class="btn primary" onclick="refreshApplicationQueue()">Refresh options</button>
-              <button class="btn" onclick="showTab('applications')">Open draft editor</button>
-            </div>
-            <div id="queueSummary"></div>
-          </div>
-          <div class="panel">
-            <h2>Today&apos;s Applications</h2>
-            <div id="queueBatch"></div>
-          </div>
-        </div>
-        <div>
-          <div class="panel">
-            <h2>Application Form Stats</h2>
-            <div id="queueDomainHealth"></div>
-          </div>
-          <div class="panel">
-            <h2>Bulk Actions</h2>
-            <div id="queueControls"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="resume_lab">
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>My CV &amp; Documents</h2>
-            <p class="muted">Keep your main CV, tailored variants, and reusable career documents in one place.</p>
-            <div id="resumeLabSummary"></div>
-          </div>
-          <div class="panel">
-            <h2>CV Versions</h2>
-            <div id="resumeLabCvVersions"></div>
-          </div>
-          <div class="panel">
-            <h2>Tailored Versions</h2>
-            <div id="resumeLabDrafts"></div>
-          </div>
-          <div class="panel">
-            <h2>Your Application Files</h2>
-            <div id="resumeLabArtifacts"></div>
-          </div>
-        </div>
-        <div>
-          <div class="panel">
-            <h2>CV Version Editor</h2>
-            <div id="resumeLabEditor"></div>
-          </div>
-          <div class="panel">
-            <h2>Your Profile Summary</h2>
-            <div id="resumeLabProfile"></div>
-          </div>
-          <div class="panel">
-            <h2>Your Writing Style</h2>
-            <div id="resumeLabVoice"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="ats_scanner">
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Is Your Application Ready?</h2>
-            <p class="muted">Review readiness before you spend time preparing a live form.</p>
-            <div id="scannerOverview"></div>
-          </div>
-          <div class="panel">
-            <h2>Is Your Application Ready?</h2>
-            <div id="scannerApplications"></div>
-          </div>
-        </div>
-        <div>
-            <div class="panel">
-              <h2>What Needs Attention</h2>
-              <div id="scannerHotspots"></div>
-            </div>
-            <div class="panel">
-              <h2>Application Form Results</h2>
-              <div id="scannerPlatforms"></div>
-            </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="interview_prep">
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Interview Prep</h2>
-            <p class="muted">Track interview-stage roles, recruiter reply signals, and reusable answer stories.</p>
-            <div id="interviewPrepOverview"></div>
-          </div>
-          <div class="panel">
-            <h2>Signs You&apos;re Getting an Interview</h2>
-            <div id="interviewPrepSignals"></div>
-          </div>
-          <div class="panel">
-            <h2>Answer Bank</h2>
-            <div id="interviewPrepAnswers"></div>
-          </div>
-        </div>
-        <div>
-          <div class="panel">
-            <h2>Story Bank</h2>
-            <div id="interviewPrepStories"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="profile">
-      <div class="panel">
-        <h2>Profile Vault</h2>
-        <div class="row">
-          <div><label>Full name</label><input id="profile_full_name"></div>
-          <div><label>Email</label><input id="profile_email"></div>
-          <div><label>Phone</label><input id="profile_phone"></div>
-          <div><label>Location</label><input id="profile_location"></div>
-          <div><label>Street address</label><input id="profile_street_address"></div>
-          <div><label>Suburb</label><input id="profile_suburb"></div>
-          <div><label>City</label><input id="profile_city"></div>
-          <div><label>Province / region</label><input id="profile_region"></div>
-          <div><label>Postcode</label><input id="profile_postcode"></div>
-          <div><label>Country</label><input id="profile_country"></div>
-          <div><label>LinkedIn URL</label><input id="profile_linkedin_url"></div>
-          <div><label>Portfolio URL</label><input id="profile_portfolio_url"></div>
-          <div><label>Headshot path</label><input id="profile_headshot_path" placeholder="/Users/phillip/Desktop/..."></div>
-          <div><label>Current employer</label><input id="profile_current_employer"></div>
-          <div><label>Current job title</label><input id="profile_current_job_title"></div>
-          <div><label>Driver's license</label><input id="profile_drivers_license" placeholder="Yes / No"></div>
-        </div>
-        <label>CV path</label><input id="profile_cv_path">
-        <label>CV/profile text</label><textarea id="profile_cv_text" style="min-height:220px"></textarea>
-        <div class="row">
-          <div><label>Target roles</label><textarea id="profile_target_roles"></textarea></div>
-          <div><label>Preferred industries</label><textarea id="profile_preferred_industries"></textarea></div>
-          <div><label>Target locations</label><textarea id="profile_target_locations"></textarea></div>
-          <div><label>Work authorization</label><textarea id="profile_work_authorization"></textarea></div>
-          <div><label>Salary expectation</label><textarea id="profile_salary_expectation"></textarea></div>
-          <div><label>Salary target ZAR/month</label><input id="profile_salary_target_zar_monthly"></div>
-          <div><label>Availability</label><textarea id="profile_availability"></textarea></div>
-          <div><label>Notice period</label><textarea id="profile_notice_period"></textarea></div>
-          <div><label>Relocation</label><textarea id="profile_relocation"></textarea></div>
-          <div><label>Demographics policy</label><textarea id="profile_demographics_policy"></textarea></div>
-          <div><label>References policy</label><textarea id="profile_references_policy"></textarea></div>
-          <div><label>Email provider</label><input id="profile_email_provider"></div>
-          <div><label>Tone</label><textarea id="profile_tone"></textarea></div>
-          <div><label>Email/CV sending voice</label><textarea id="profile_email_voice"></textarea></div>
-          <div><label>Writing sample document path</label><input id="profile_writing_sample_path" placeholder="/Users/phillip/Desktop/..."></div>
-        </div>
-        <label>Writing sample text</label><textarea id="profile_writing_sample_text" style="min-height:180px" placeholder="Paste something you wrote naturally, or add a document path above and extract it."></textarea>
-        <label>Writing style notes</label><textarea id="profile_writing_style_notes" style="min-height:140px"></textarea>
-        <div class="actions">
-          <button class="btn primary" onclick="saveProfile()">Save my profile</button>
-          <button class="btn" onclick="extractCv()">Read my CV</button>
-          <button class="btn" onclick="extractWritingSample()">Analyse my writing style</button>
-          <button class="btn" onclick="showTab('applications');setTimeout(()=>document.getElementById('siteCredentialPanel')?.scrollIntoView({behavior:'smooth'}),100)"><i data-lucide="key"></i> Manage saved logins</button>
-        </div>
-      </div>
-    </section>
-
-    <section id="discover">
-      <p class="section-intro">Pull in job listings from company career pages and job boards. The tool filters them automatically and shows you the best matches.</p>
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Search for Jobs</h2>
-            <p class="muted">Use public board tokens/site names. Examples: a Greenhouse board token from boards.greenhouse.io/company, a Lever site from jobs.lever.co/company, or an Ashby board name.</p>
-            <div class="row">
-              <div>
-                <label>Source</label>
-                <select id="discover_source">
-                  <option value="greenhouse">Greenhouse</option>
-                  <option value="lever">Lever</option>
-                  <option value="ashby">Ashby</option>
-                  <option value="smartrecruiters">SmartRecruiters</option>
-                  <option value="recruitee">Recruitee</option>
-                  <option value="careers">Public careers page</option>
-                </select>
-              </div>
-              <div><label>Board token / site name</label><input id="discover_token" placeholder="company-name"></div>
-            </div>
-            <label>Optional search query</label><input id="discover_query" value="graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator">
-            <div class="actions">
-              <button class="btn primary" onclick="discover()">Search now</button>
-              <button class="btn" onclick="useGraduateDiscoveryQuery()">Use my default search</button>
-            </div>
-          </div>
-          <div class="panel">
-            <h2>Automatic Job Sources</h2>
-            <p class="muted">Saved sources rerun once per day while this local app is open. Use ATS board tokens/company identifiers or a direct careers URL.</p>
-            <div class="row">
-              <div><label>Name</label><input id="source_name" placeholder="Nike Greenhouse"></div>
-              <div>
-                <label>Type</label>
-                <select id="source_type">
-                  <optgroup label="ATS boards">
-                    <option value="greenhouse">Greenhouse</option>
-                    <option value="lever">Lever</option>
-                    <option value="ashby">Ashby</option>
-                    <option value="smartrecruiters">SmartRecruiters</option>
-                    <option value="recruitee">Recruitee</option>
-                    <option value="workable">Workable</option>
-                    <option value="teamtailor">Teamtailor</option>
-                  </optgroup>
-                  <optgroup label="Job board feeds">
-                    <option value="jobicy_rss">Jobicy RSS (remote jobs, works great)</option>
-                    <option value="remotive">Remotive remote jobs</option>
-                    <option value="arbeitnow">Arbeitnow Europe remote</option>
-                    <option value="indeed_rss">Indeed RSS (token = location)</option>
-                    <option value="weworkremotely_rss">WeWorkRemotely RSS</option>
-                    <option value="adzuna">Adzuna SA (needs API key in .env)</option>
-                    <option value="remoteok">Remote OK remote jobs</option>
-                  </optgroup>
-                  <optgroup label="Careers pages">
-                    <option value="careers">Public careers page</option>
-                    <option value="url">Direct URL</option>
-                  </optgroup>
-                </select>
-              </div>
-            </div>
-            <label>Token / company identifier / URL</label><input id="source_token" placeholder="company-name, Workable subdomain, Teamtailor URL, or https://...">
-            <label>Optional query</label><input id="source_query" value="graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator">
-            <label><input id="source_enabled" type="checkbox" style="width:auto" checked> Enabled for daily discovery</label>
-            <div class="actions">
-              <button class="btn primary" onclick="saveSource()">Save source</button>
-              <button class="btn" onclick="seedStarterSources()">Add starter job sources</button>
-              <button class="btn" onclick="runAllSources()">Search all sources now</button>
-            </div>
-            <div id="sourceList"></div>
-          </div>
-          <div class="panel">
-            <h2>Add a Job by Link</h2>
-            <label>Job URL</label><input id="url_import" placeholder="https://...">
-            <div class="actions">
-              <button class="btn primary" onclick="importUrl()">Fetch URL</button>
-            </div>
-          </div>
-          <div class="panel">
-            <h2>Import a Job Alert Email</h2>
-            <p class="muted">Paste a LinkedIn, Indeed, Google Alert, recruiter, or company job-alert email. The app extracts job links and saves them for scoring/review without scraping protected pages.</p>
-            <label>Alert source</label><input id="alert_source" value="email-alert">
-            <label>Alert email/text</label><textarea id="alert_text" style="min-height:220px" placeholder="Paste the full job alert email or saved-search text here."></textarea>
-            <div class="actions">
-              <button class="btn primary" onclick="importAlert()">Import alert links</button>
-            </div>
-          </div>
-          <div class="panel">
-            <h2>Add a Job by Hand</h2>
-            <div class="row">
-              <div><label>Title</label><input id="manual_title"></div>
-              <div><label>Company</label><input id="manual_company"></div>
-              <div><label>Location</label><input id="manual_location"></div>
-              <div><label>Source URL</label><input id="manual_url"></div>
-            </div>
-            <label>Description</label><textarea id="manual_description" style="min-height:220px"></textarea>
-            <div class="actions">
-              <button class="btn primary" onclick="addManualJob()">Save job</button>
-            </div>
-          </div>
-        </div>
-        <div class="panel">
-          <h2>Notes on This Source</h2>
-          <p>LinkedIn and Indeed are best used here as guided/manual sources: open searches, save promising jobs, paste the job URL or description, then let this app draft and track the application.</p>
-          <p>For company career pages and ATS boards, use the URL importer or public API import where available.</p>
-          <div id="discoverLinks"></div>
-          <h2 style="margin-top:18px">Source Health</h2>
-          <div id="discoverSourceHealth"></div>
-        </div>
-      </div>
-    </section>
-
-    <section id="targets">
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Companies You Want to Work At</h2>
-            <p class="muted">Keep the 20-50 companies you actively want to track. Convert a target into an automatic source when you have a careers URL or ATS token, or into an outreach lead when no role is advertised.</p>
-            <input id="target_id" type="hidden">
-            <div class="row">
-              <div><label>Company</label><input id="target_company" placeholder="Red Bull"></div>
-              <div><label>Website</label><input id="target_website" placeholder="https://..."></div>
-              <div><label>Careers URL</label><input id="target_careers_url" placeholder="https://company.com/careers"></div>
-              <div><label>Industry</label><input id="target_industry" placeholder="Sports, fitness, outdoor"></div>
-              <div>
-                <label>Priority</label>
-                <select id="target_priority">
-                  <option value="5">5 - dream fit</option>
-                  <option value="4">4 - strong fit</option>
-                  <option value="3" selected>3 - worth tracking</option>
-                  <option value="2">2 - occasional</option>
-                  <option value="1">1 - low priority</option>
-                </select>
-              </div>
-              <div>
-                <label>Status</label>
-                <select id="target_status">
-                  <option value="target">target</option>
-                  <option value="sourcing">sourcing</option>
-                  <option value="outreach-ready">outreach-ready</option>
-                  <option value="paused">paused</option>
-                </select>
-              </div>
-              <div>
-                <label>Source type</label>
-                <select id="target_source_type">
-                  <option value="">Auto/direct URL</option>
-                  <optgroup label="ATS boards">
-                    <option value="greenhouse">Greenhouse</option>
-                    <option value="lever">Lever</option>
-                    <option value="ashby">Ashby</option>
-                    <option value="smartrecruiters">SmartRecruiters</option>
-                    <option value="recruitee">Recruitee</option>
-                    <option value="workable">Workable</option>
-                    <option value="teamtailor">Teamtailor</option>
-                  </optgroup>
-                  <optgroup label="Careers pages">
-                    <option value="careers">Public careers page</option>
-                    <option value="url">Direct URL</option>
-                  </optgroup>
-                </select>
-              </div>
-              <div><label>ATS token / source token</label><input id="target_source_token" placeholder="company-name or board token"></div>
-            </div>
-            <label>Source query</label><input id="target_source_query" value="graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator">
-            <label>Notes / why they fit</label><textarea id="target_notes" placeholder="Specific products, campaigns, community, brand angle, or contact ideas."></textarea>
-            <div class="actions">
-              <button class="btn primary" onclick="saveTarget()">Save company</button>
-              <button class="btn" onclick="clearTargetForm()">New target</button>
-              <button class="btn" onclick="seedStarterTargets()">Add starter dream companies</button>
-            </div>
-          </div>
-          <div class="panel">
-            <h2>Add Many Companies at Once</h2>
-            <p class="muted">One company per line. Format: Company | website | industry | careers URL | notes</p>
-            <textarea id="target_bulk" placeholder="Salomon | https://www.salomon.com | Outdoor sports | https://www.salomon.com/careers | Trail running and outdoor brand"></textarea>
-            <div class="actions">
-              <button class="btn primary" onclick="importTargets()">Import targets</button>
-            </div>
-          </div>
-        </div>
-        <div class="panel">
-          <h2>Your Dream Company List</h2>
-          <div id="targetList"></div>
-        </div>
-      </div>
-    </section>
-
-    <section id="jobs">
-      <div class="panel">
-        <h2>Found Jobs</h2>
-        <div class="actions">
-          <select id="job_filter" onchange="renderJobs()">
-            <option value="">All statuses</option>
-            <option value="new">New</option>
-            <option value="shortlisted">Picked for review</option>
-            <option value="drafted">Draft</option>
-            <option value="applied">Applied</option>
-            <option value="rejected">Rejected</option>
-          </select>
-          <button class="btn" onclick="rescoreJobs()">Refresh job scores</button>
-          <button class="btn primary" onclick="shortlistTopJobs()">Pick my top 5 jobs</button>
-          <button class="btn" onclick="generateShortlistDrafts()">Create drafts for top jobs</button>
-        </div>
-        <div id="jobList" class="jobs"></div>
-      </div>
-    </section>
-
-    <section id="applications">
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Your Application Drafts</h2>
-            <p class="muted">Open one draft, prepare the form, then submit it yourself.</p>
-            <div id="applicationDomainBlocks"></div>
-            <div class="actions">
-              <button class="btn primary" onclick="refreshApplicationQueue()">Refresh options</button>
-              <button class="btn" onclick="showTab('auto_apply_queue')">Open queue board</button>
-              <button class="btn" onclick="runFormFillSmokeTest()">Test form filling</button>
-            </div>
-            <div class="actions">
-              <label for="application_view_mode" style="margin:0">View</label>
-              <select id="application_view_mode" onchange="renderApplications()">
-                <option value="current">Current batch</option>
-                <option value="active">Active only</option>
-                <option value="all">All</option>
-              </select>
-            </div>
-            <div id="applicationList"></div>
-          </div>
-          <div class="panel" id="siteCredentialPanel">
-            <h2>🔐 Saved Logins & Passwords</h2>
-            <p class="section-intro">Save a login for any job site here and the tool will fill it in automatically when you apply. Passwords are stored securely in macOS Keychain — not in the database.</p>
-            <div class="notice ok" style="margin-bottom:12px">
-              <strong>To apply on RemoteOK or similar sites</strong> — add <code>remoteok.com</code> as a domain below with your email and a password. The form filler will then create or log into your account automatically before filling the application.
-            </div>
-            <input id="credential_id" type="hidden">
-            <div class="row">
-              <div><label>Website domain</label><input id="credential_domain" placeholder="remoteok.com"></div>
-              <div><label>Login page URL <span class="muted">(optional)</span></label><input id="credential_login_url" placeholder="https://remoteok.com/sign-up"></div>
-            </div>
-            <div class="row">
-              <div><label>Your email / username</label><input id="credential_username" placeholder="Phillip2002@mweb.co.za"></div>
-              <div><label>Password</label><input id="credential_password" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing"></div>
-            </div>
-            <label>Notes <span class="muted">(optional)</span></label><textarea id="credential_notes" placeholder="e.g. worker account, used for job applications" style="min-height:60px"></textarea>
-            <label><input id="credential_enabled" type="checkbox" style="width:auto" checked> Use this automatically when filling forms</label>
-            <div class="actions">
-              <button class="btn primary" onclick="saveSiteCredential()"><i data-lucide="save"></i> Save login</button>
-              <button class="btn" onclick="clearSiteCredentialForm()">Add another</button>
-            </div>
-            <div id="siteCredentialList" style="margin-top:12px"></div>
-          </div>
-        </div>
-        <div class="panel">
-          <h2>Edit Your Application</h2>
-          <div id="applicationEditor" class="muted">Select an application draft.</div>
-        </div>
-      </div>
-    </section>
-
-    <section id="outreach">
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Reach Out to a Company</h2>
-            <div class="notice">
-              Use this for thoughtful one-to-one emails to founders, owners, or hiring people at brands you genuinely want to work with. The app drafts the email, but you still review it before anything is sent.
-            </div>
-            <div class="row">
-              <div><label>Company</label><input id="lead_company"></div>
-              <div><label>Website</label><input id="lead_website" placeholder="https://..."></div>
-              <div><label>Industry</label><input id="lead_industry" placeholder="Outdoor, fitness, sport, consumer brand"></div>
-              <div><label>Source URL</label><input id="lead_source_url" placeholder="Where you found them"></div>
-              <div><label>Contact name</label><input id="lead_contact_name"></div>
-              <div><label>Contact role</label><input id="lead_contact_role"></div>
-            </div>
-            <label>Outreach style</label>
-            <select id="lead_outreach_style">
-              <option value="intro">Short intro email</option>
-              <option value="proposal">Proposal-style email</option>
-            </select>
-            <label>Contact email</label><input id="lead_contact_email" placeholder="founder@company.com or owner@company.com">
-            <label>Why this brand fits / why you fit</label><textarea id="lead_company_notes" placeholder="What you genuinely like about the brand, what stands out, how your background lines up, and what kind of support you could offer."></textarea>
-            <label>Contact-finding notes</label><textarea id="lead_contact_search_notes" placeholder="Who to look for, where to search, and any public contact paths you want to try."></textarea>
-            <div class="actions">
-              <button class="btn primary" onclick="saveLead()">Save company</button>
-              <button class="btn" onclick="showTab('targets')">Use a target company instead</button>
-            </div>
-          </div>
-          <div class="panel">
-            <h2>Companies You&apos;ve Contacted</h2>
-            <div id="leadList"></div>
-          </div>
-        </div>
-        <div class="panel">
-          <h2>Write &amp; Send</h2>
-          <div id="leadEditor" class="muted">Select a company lead.</div>
-        </div>
-      </div>
-    </section>
-
-    <section id="analytics">
-      <div class="panel">
-        <h2>Analytics</h2>
-        <div id="analyticsOverview"></div>
-      </div>
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Application Pipeline</h2>
-            <div id="analyticsFunnel"></div>
-          </div>
-          <div class="panel">
-            <h2>Which Sources Work Best</h2>
-            <div id="analyticsSources"></div>
-          </div>
-        </div>
-        <div>
-          <div class="panel">
-            <h2>Follow-up Status</h2>
-            <div id="analyticsFollowups"></div>
-          </div>
-          <div class="panel">
-            <h2>Replies &amp; Outcomes</h2>
-            <div id="analyticsReplies"></div>
-          </div>
-          <div class="panel">
-            <h2>Recommendations</h2>
-            <div id="analyticsRecommendations"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="auto">
-      <div class="grid">
-        <div>
-          <div class="panel">
-            <h2>Run Everything Automatically</h2>
-            <div class="notice">
-              Automatic mode prepares the work queue, but it does not submit applications or send emails. Final submission and final send stay manual.
-            </div>
-            <label>Daily application target</label><input id="auto_limit" value="5" type="number" min="1" max="15">
-            <div class="actions">
-              <button class="btn primary" onclick="runAutomaticMode()">Run full workflow</button>
-              <button class="btn" onclick="exportReminders()">Export follow-up reminders</button>
-              <button class="btn" onclick="notifyDueReminders()">Send due reminders now</button>
-              <button class="btn" onclick="showTab('dashboard')">Review Daily Review</button>
-              <button class="btn" onclick="showTab('analytics')">View Analytics</button>
-            </div>
-            <div id="autoStatus"></div>
-          </div>
-          <div class="panel">
-            <h2>Recent Automation Runs</h2>
-            <div id="automationRuns"></div>
-          </div>
-          <div class="panel">
-            <h2>Fix Broken Sources</h2>
-            <div class="actions">
-              <button class="btn" onclick="pauseFailingSources()">Pause broken sources</button>
-            </div>
-            <div id="sourceCleanup"></div>
-          </div>
-          <div class="panel">
-            <h2>Application Form Feedback</h2>
-            <div id="formFeedbackSummary"></div>
-          </div>
-        </div>
-        <div>
-          <div class="panel">
-            <h2>CV Versions</h2>
-            <div id="cvVersionList"></div>
-          </div>
-          <div class="panel">
-            <h2>Answer Bank</h2>
-            <div id="answerBankList"></div>
-          </div>
-          <div class="panel">
-            <h2>Story Bank</h2>
-            <div id="storyBankList"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="email">
-      <div class="grid">
-        <div class="panel">
-          <h2>Email Setup</h2>
-          <p class="muted">MWEB's current SMTP guidance is `smtp.mweb.co.za`, port `587`, authentication required, with your full email address as username. These settings are saved locally in `.env`, which is gitignored.</p>
-          <div class="row">
-            <div><label>SMTP host</label><input id="email_host" value="smtp.mweb.co.za"></div>
-            <div><label>SMTP port</label><input id="email_port" value="587"></div>
-            <div><label>Username</label><input id="email_user" value="Phillip2002@mweb.co.za"></div>
-            <div><label>From address</label><input id="email_from" value="Phillip2002@mweb.co.za"></div>
-            <div><label>Default test recipient</label><input id="email_to" placeholder="Usually your own email first"></div>
-            <div><label>Password</label><input id="email_password" type="password" autocomplete="new-password" placeholder="Stored locally if saved"></div>
-          </div>
-          <label><input id="email_starttls" type="checkbox" style="width:auto" checked> Use STARTTLS/encryption on port 587</label>
-          <div class="actions">
-            <button class="btn primary" onclick="saveEmailConfig()">Save email settings</button>
-            <button class="btn" onclick="sendTestEmail()">Send a test email</button>
-          </div>
-        </div>
-        <div class="panel">
-          <h2>Status</h2>
-          <div id="emailStatus"></div>
-          <pre>Use this first:
-1. Save settings with your MWEB password.
-2. Send a test email to yourself.
-3. If MWEB rejects STARTTLS, untick STARTTLS and test again.
-4. Once the test works, follow-up drafts can be sent from the Applications tab.</pre>
-        </div>
-        <div class="panel">
-          <h2>Inbox Reply Tracking</h2>
-          <p class="muted">IMAP is read-only here. The app scans your inbox, matches likely recruiter/company replies to applications or outreach, and waits for you to decide what to do.</p>
-          <div class="row">
-            <div><label>IMAP host</label><input id="inbox_host" value="imap.mweb.co.za"></div>
-            <div><label>IMAP port</label><input id="inbox_port" value="993"></div>
-            <div><label>Username</label><input id="inbox_user" value="Phillip2002@mweb.co.za"></div>
-            <div><label>Mailbox</label><input id="inbox_mailbox" value="INBOX"></div>
-            <div><label>Lookback days</label><input id="inbox_lookback_days" type="number" min="1" max="365" value="45"></div>
-            <div><label>Password</label><input id="inbox_password" type="password" autocomplete="new-password" placeholder="Stored locally if saved"></div>
-          </div>
-          <label><input id="inbox_ssl" type="checkbox" style="width:auto" checked> Use SSL/TLS on port 993</label>
-          <div class="actions">
-            <button class="btn primary" onclick="saveInboxConfig()">Save inbox settings</button>
-            <button class="btn" onclick="scanInbox()">Check inbox now</button>
-          </div>
-          <div id="inboxStatus"></div>
-        </div>
-        <div class="panel">
-          <h2>Tracked Replies</h2>
-          <div id="inboxMessages"></div>
-        </div>
-      </div>
-    </section>
-
-    <section id="session">
-      <div class="grid">
-        <div class="panel">
-          <h2>Session Notes</h2>
-          <p class="muted">This is the durable handoff future sessions read before continuing the project. Use the draft button near the end of a work session, review the text, then save it.</p>
-          <textarea id="session_memory" style="min-height:520px"></textarea>
-          <div class="actions">
-            <button class="btn" onclick="refreshSessionMemory()">Refresh</button>
-            <button class="btn primary" onclick="generateEndSessionDraft()">Write session summary</button>
-            <button class="btn warn" onclick="saveSessionMemory()">Save session notes</button>
-          </div>
-        </div>
-        <div class="panel">
-          <h2>Remember for Next Time</h2>
-          <pre>When Phillip says "end session", update SESSION_MEMORY.md before replying.
-
-Do not store passwords, SMTP secrets, API keys, cookies, or private tokens.
-
-Record:
-- completed work
-- changed files
-- current app health if checked
-- decisions and preferences
-- blockers or risks
-- best next actions</pre>
-        </div>
-      </div>
-    </section>
   </main>
-
-  <script>
-    let state = {profile: {}, jobs: [], applications: [], targets: [], site_credentials: []};
-    let selectedApplication = null;
-    let selectedLead = null;
-    let selectedTarget = null;
-    let selectedCvVersion = null;
-    const primaryTabs = new Set(["dashboard", "auto_apply_queue", "applications", "outreach", "resume_lab", "profile", "email"]);
-    const advancedTabs = new Set(["discover", "targets", "jobs", "ats_scanner", "interview_prep", "auto", "analytics", "session"]);
-    const graduateDiscoveryQuery = "graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator";
-    const rejectionReasonChoices = [
-      "too senior",
-      "not really marketing",
-      "wrong location",
-      "weak brand fit",
-      "salary too low",
-      "remote eligibility unclear",
-      "duplicate / already seen",
-      "poor application quality",
-      "other"
-    ];
-
-    const profileKeys = [
-      "full_name", "email", "phone", "location", "street_address", "suburb", "city", "region", "postcode", "country",
-      "headshot_path", "current_employer", "current_job_title", "drivers_license", "cv_path", "cv_text",
-      "portfolio_url", "linkedin_url", "target_roles", "preferred_industries",
-      "target_locations", "work_authorization", "salary_expectation",
-      "salary_target_zar_monthly", "availability", "notice_period", "relocation",
-      "demographics_policy", "references_policy", "email_provider", "tone", "email_voice",
-      "writing_sample_path", "writing_sample_text", "writing_style_notes"
-    ];
-    let reminderPopupShown = false;
-
-    document.querySelectorAll("nav button[data-tab]").forEach(button => {
-      button.addEventListener("click", () => showTab(button.dataset.tab));
-    });
-    document.getElementById("advancedToggle")?.addEventListener("click", () => {
-      const nav = document.getElementById("advancedNav");
-      const next = !nav?.classList.contains("open");
-      setAdvancedNav(next);
-    });
-
-    function setAdvancedNav(open) {
-      const nav = document.getElementById("advancedNav");
-      const toggle = document.getElementById("advancedToggle");
-      if (nav) nav.classList.toggle("open", Boolean(open));
-      if (toggle) toggle.classList.toggle("ghost-active", Boolean(open));
-    }
-
-    function showTab(tab) {
-      setAdvancedNav(advancedTabs.has(tab));
-      document.querySelectorAll("nav button[data-tab]").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-      document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.id === tab));
-      const toggle = document.getElementById("advancedToggle");
-      if (toggle) toggle.classList.toggle("active", advancedTabs.has(tab) && !primaryTabs.has(tab));
-    }
-
-    async function api(path, options = {}) {
-      const response = await fetch(path, {
-        headers: {"content-type": "application/json"},
-        ...options
-      });
-      const payload = await response.json();
-      if (!payload.ok && payload.error) throw new Error(payload.error);
-      return payload;
-    }
-
-    async function load() {
-      state = await api("/api/state");
-      renderProfile();
-      renderDashboard();
-      renderAutoApplyQueue();
-      renderResumeLab();
-      renderAtsScanner();
-      renderInterviewPrep();
-      renderEmail();
-      renderJobs();
-      renderApplications();
-      renderLeads();
-      renderTargets();
-      renderSources();
-      renderSourceHealth();
-      renderAnalytics();
-      renderAutoMode();
-      renderSearchLinks();
-      renderSessionMemory();
-    }
-
-    function message(text, type = "ok") {
-      const el = document.getElementById("message");
-      el.innerHTML = `<div class="notice ${type === "bad" ? "bad" : ""}">${escapeHtml(text)}</div>`;
-      el.scrollIntoView({behavior: "smooth", block: "nearest"});
-      setTimeout(() => { el.innerHTML = ""; }, type === "bad" ? 10000 : 5000);
-    }
-
-    function renderProfile() {
-      for (const key of profileKeys) {
-        const el = document.getElementById(`profile_${key}`);
-        if (el) el.value = state.profile[key] || "";
-      }
-    }
-
-    function renderDashboard() {
-      const jobs = state.jobs;
-      const apps = state.applications;
-      const ready = jobs.filter(j => j.score >= 55 && ["new", "shortlisted"].includes(j.status)).length;
-      const drafted = apps.filter(a => a.status === "draft").length;
-      const applied = jobs.filter(j => j.status === "applied").length;
-      const leadCount = (state.leads || []).length;
-      const targetCount = (state.targets || []).length;
-      const sourceCount = (state.sources || []).filter(source => source.enabled).length;
-      const reminders = followUpReminders();
-      const batchApps = currentBatchApplications();
-      const approved = batchApps.filter(app => normalizeQueueState(app.queue_state) === "approved").length;
-      const review = batchApps.filter(app => normalizeQueueState(app.queue_state) === "review").length;
-      const missingResearch = batchApps.filter(app => !(app.research_notes || "").trim()).length;
-      const workflowGuide = document.getElementById("workflowGuide");
-      document.getElementById("summary").innerHTML = `
-        <div class="metric-grid">
-          ${metric("Jobs tracked", jobs.length, "all sources")}
-          ${metric("Queue review", review, "need a decision")}
-          ${metric("Approved", approved, "ready for prep")}
-          ${metric("Submitted", applied, "already sent")}
-        </div>
-        <p><strong>${ready}</strong> strong jobs are still in the pool.</p>
-        <p><strong>${drafted}</strong> draft applications exist.</p>
-        <p><strong>${targetCount}</strong> target companies tracked. <strong>${sourceCount}</strong> automatic sources enabled. <strong>${leadCount}</strong> outreach leads tracked.</p>
-        <p class="muted">Daily target: ${escapeHtml(state.profile.daily_target || "5 high-quality applications per day.")}</p>
-        <h3>Follow-up Reminders</h3>
-        ${renderReminderList(reminders)}
-      `;
-      if (workflowGuide) {
-        workflowGuide.innerHTML = `
-          <div class="workflow-list">
-            <div class="workflow-step">
-              <strong>1. Refresh roles</strong>
-              Pull a fresh batch only when the current queue is exhausted or weak.
-              <div class="actions">
-                <button class="btn primary" onclick="refreshApplicationQueue()">Refresh options</button>
-                <button class="btn" onclick="showTab('discover')">Add sources</button>
-              </div>
-            </div>
-            <div class="workflow-step">
-              <strong>2. Review the queue</strong>
-              ${review} role(s) need a keep/reject decision and ${approved} role(s) are already approved.
-              <div class="actions">
-                <button class="btn primary" onclick="showTab('auto_apply_queue')">Open queue</button>
-                <button class="btn" onclick="showTab('ats_scanner')">Check application readiness</button>
-              </div>
-            </div>
-            <div class="workflow-step">
-              <strong>3. Prepare one application</strong>
-              ${missingResearch ? `${missingResearch} current-batch draft(s) still need research or cleanup first.` : "Current batch research coverage is acceptable."}
-              <div class="actions">
-                <button class="btn primary" onclick="showTab('applications')">Open applications</button>
-                <button class="btn" onclick="showTab('resume_lab')">Check documents</button>
-              </div>
-            </div>
-            <div class="workflow-step">
-              <strong>4. Send follow-ups</strong>
-              Review due reminders or send a thoughtful direct outreach email.
-              <div class="actions">
-                <button class="btn" onclick="showTab('outreach')">Open outreach</button>
-                <button class="btn" onclick="showTab('email')">Open email</button>
-              </div>
-            </div>
-          </div>
-        `;
-      }
-      renderDailyReview();
-      showReminderPopup(reminders);
-    }
-
-    function useGraduateDiscoveryQuery() {
-      const discover = document.getElementById("discover_query");
-      const source = document.getElementById("source_query");
-      const target = document.getElementById("target_source_query");
-      if (discover) discover.value = graduateDiscoveryQuery;
-      if (source) source.value = graduateDiscoveryQuery;
-      if (target) target.value = graduateDiscoveryQuery;
-      message("Graduate marketing discovery query loaded.");
-    }
-
-    function currentBatchApplications() {
-      const completedStatuses = new Set(["submitted", "interview", "offer", "rejected"]);
-      const activeApps = (state.applications || []).filter(app => !completedStatuses.has(String(app.status || "draft")));
-      const actionableApps = activeApps.filter(app => !isBoardPrepBlockedApp(app));
-      const latestBatchId = actionableApps.reduce((latest, app) => {
-        const batchId = String(app.batch_id || "");
-        if (!batchId) return latest;
-        return !latest || batchId > latest ? batchId : latest;
-      }, "");
-      const queueOrder = {approved: 0, review: 1, hold: 2};
-      const queueState = app => normalizeQueueState(app.queue_state);
-      const apps = latestBatchId ? actionableApps.filter(app => String(app.batch_id || "") === latestBatchId) : actionableApps.slice(0, 5);
-      return apps.slice().sort((a, b) => {
-        const diff = (queueOrder[queueState(a)] ?? 9) - (queueOrder[queueState(b)] ?? 9);
-        if (diff) return diff;
-        return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
-      });
-    }
-
-    function normalizeQueueState(value) {
-      const normalized = String(value || "").toLowerCase();
-      return ["review", "approved", "hold"].includes(normalized) ? normalized : "review";
-    }
-
-    function isBoardPrepBlockedUrl(url) {
-      const lower = String(url || "").toLowerCase();
-      return lower.includes("remoteok.com/remote-jobs/");
-    }
-
-    function isBoardPrepBlockedApp(app) {
-      return isBoardPrepBlockedUrl(app?.url || "");
-    }
-
-    function isActionableApplication(app) {
-      return !isBoardPrepBlockedApp(app);
-    }
-
-    function queueStateLabel(app) {
-      const labels = {review: "needs review", approved: "approved", hold: "on hold"};
-      return labels[normalizeQueueState(app.queue_state)] || "needs review";
-    }
-
-    function scannerKeywordSignals(job) {
-      const text = `${job.title || ""} ${job.description || ""}`.toLowerCase();
-      const terms = ["marketing", "brand", "campaign", "content", "social media", "community", "growth", "analytics", "events", "partnership", "seo", "paid media", "meta ads", "google analytics", "sport", "sports", "fitness", "wellness", "outdoor", "consumer"];
-      return terms.filter(term => text.includes(term)).slice(0, 10);
-    }
-
-    function draftKeywordCoverage(app, job) {
-      const haystack = `${app.cover_letter || ""}\n${app.answers || ""}\n${app.cv_notes || ""}`.toLowerCase();
-      const keywords = scannerKeywordSignals(job);
-      return {
-        matched: keywords.filter(term => haystack.includes(term)),
-        missing: keywords.filter(term => !haystack.includes(term)),
-      };
-    }
-
-    function safeForAutoApproval(app) {
-      const job = appJob(app);
-      return (
-        normalizeQueueState(app.queue_state) === "review" &&
-        !activeBlockedDomain(app.url) &&
-        !activeThrottledDomain(app.url) &&
-        Number(app.quality_score || 0) >= 70 &&
-        !(app.truthfulness_flags || "").trim() &&
-        !(job.concerns || "").trim() &&
-        missingApplicationItems(app).filter(item => !item.includes("contact")).length === 0
-      );
-    }
-
-    function renderAutoApplyQueue() {
-      const summary = document.getElementById("queueSummary");
-      const batch = document.getElementById("queueBatch");
-      const health = document.getElementById("queueDomainHealth");
-      const controls = document.getElementById("queueControls");
-      if (!summary || !batch || !health || !controls) return;
-      const apps = currentBatchApplications();
-      const approved = apps.filter(app => normalizeQueueState(app.queue_state) === "approved").length;
-      const review = apps.filter(app => normalizeQueueState(app.queue_state) === "review").length;
-      const hold = apps.filter(app => normalizeQueueState(app.queue_state) === "hold").length;
-      const ready = apps.filter(app => normalizeQueueState(app.queue_state) === "approved" && !activeBlockedDomain(app.url) && !activeThrottledDomain(app.url)).length;
-      summary.innerHTML = `
-        <div class="metric-grid">
-          ${metric("Current batch", apps.length, "latest generated set")}
-          ${metric("Approved", approved, "cleared for prep")}
-          ${metric("Needs review", review, "awaiting your decision")}
-          ${metric("On hold", hold, "kept aside for later")}
-          ${metric("Ready", ready, "approved and not blocked")}
-          ${metric("Prepared", apps.filter(app => app.form_prep_started_at).length, "live form prep started")}
-        </div>
-      `;
-      const grouped = {
-        review: apps.filter(app => normalizeQueueState(app.queue_state) === "review"),
-        approved: apps.filter(app => normalizeQueueState(app.queue_state) === "approved"),
-        hold: apps.filter(app => normalizeQueueState(app.queue_state) === "hold"),
-      };
-      const renderQueueCard = app => {
-        const job = appJob(app);
-        const isBlocked = activeBlockedDomain(app.url);
-        const isThrottled = !isBlocked && activeThrottledDomain(app.url);
-        const boardBlocked = isBoardPrepBlockedApp(app);
-        return `
-          <div class="reminder">
-            <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
-            <div class="meta">Score ${escapeHtml(job.score ?? "n/a")} - quality ${escapeHtml(app.quality_score || 0)} - ${escapeHtml(app.location || "Location not listed")}</div>
-            <p class="muted">${escapeHtml(nextApplicationAction(app))}</p>
-            <div>
-              <span class="tag">${escapeHtml(queueStateLabel(app))}</span>
-              ${boardBlocked ? `<span class="tag">needs direct apply link</span>` : ""}
-              ${app.manual_first ? `<span class="tag">manual-first ATS</span>` : ""}
-              ${isBlocked ? `<span class="tag">ats cooldown</span>` : ""}
-              ${isThrottled ? `<span class="tag">ats rate limit</span>` : ""}
-              ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
-            </div>
-            <div class="actions">
-              <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
-              <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
-              <button class="btn" onclick="setApplicationQueueState(${app.id}, 'review')">Review</button>
-              <button class="btn primary" onclick="selectApplication(${app.id})">Edit draft</button>
-              ${boardBlocked ? "" : `<button class="btn" onclick="prepareApplicationCard(${app.id})">Fill in application form</button>`}
-              <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">Skip this role</button>
-              ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">${boardBlocked ? "Open listing" : "Open job"}</a>` : ""}
-            </div>
-          </div>
-        `;
-      };
-      batch.innerHTML = apps.length ? `
-        <div class="grid">
-          <div class="panel">
-            <h3>Needs Review</h3>
-            ${grouped.review.map(renderQueueCard).join("") || `<p class="muted">No roles waiting for review.</p>`}
-          </div>
-          <div class="panel">
-            <h3>Approved</h3>
-            ${grouped.approved.map(renderQueueCard).join("") || `<p class="muted">No approved roles yet.</p>`}
-          </div>
-          <div class="panel">
-            <h3>On Hold</h3>
-            ${grouped.hold.map(renderQueueCard).join("") || `<p class="muted">No roles on hold.</p>`}
-          </div>
-        </div>
-      ` : `<p class="muted">No current batch yet. Refresh the queue after discovery finds stronger graduate-level roles.</p>`;
-      const blocked = blockedDomainSummaryHtml();
-      const throttled = throttledDomainSummaryHtml();
-      health.innerHTML = `
-        <h3>Cooldowns</h3>
-        ${blocked}
-        <h3 style="margin-top:16px">Pacing Limits</h3>
-        ${throttled}
-      `;
-      controls.innerHTML = `
-        <p class="muted">Keep strong roles, hold uncertain ones, and reject weak ones.</p>
-        <div class="actions">
-          <button class="btn primary" onclick="refreshApplicationQueue()">Pull next batch</button>
-          <button class="btn" onclick="cleanupStaleApplications()">Clean stale drafts</button>
-          <button class="btn" onclick="approveSafeQueueRoles()">Approve safe roles</button>
-          <button class="btn" onclick="holdBlockedQueueRoles()">Hold roles needing manual apply</button>
-          <button class="btn" onclick="returnQueueToReview()">Move all back to review</button>
-          <button class="btn" onclick="showTab('discover')">Add more sources</button>
-          <button class="btn" onclick="showTab('analytics')">Check source quality</button>
-        </div>
-      `;
-    }
-
-    function renderResumeLab() {
-      const summary = document.getElementById("resumeLabSummary");
-      const cvs = document.getElementById("resumeLabCvVersions");
-      const drafts = document.getElementById("resumeLabDrafts");
-      const artifacts = document.getElementById("resumeLabArtifacts");
-      const editor = document.getElementById("resumeLabEditor");
-      const profile = document.getElementById("resumeLabProfile");
-      const voice = document.getElementById("resumeLabVoice");
-      if (!summary || !cvs || !drafts || !artifacts || !editor || !profile || !voice) return;
-      const cvVersions = state.cv_versions || [];
-      const apps = currentBatchApplications();
-      summary.innerHTML = `
-        <div class="metric-grid">
-          ${metric("CV versions", cvVersions.length, "saved variants")}
-          ${metric("Current drafts", apps.length, "active batch")}
-          ${metric("Tailored briefs", apps.filter(app => app.recommended_cv_version).length, "recommended CV guidance")}
-          ${metric("Writing sample", state.profile.writing_sample_text ? "Loaded" : "Missing", state.profile.writing_sample_path || "no source path")}
-        </div>
-      `;
-      cvs.innerHTML = cvVersions.map(cv => `
-        <div class="reminder">
-          <h3>${escapeHtml(cv.name || "CV version")}</h3>
-          <div class="meta">${escapeHtml(cv.focus || "")}${cv.is_default ? " - default" : ""}</div>
-          <p>${escapeHtml(cv.notes || "")}</p>
-          <p class="muted">${escapeHtml(cv.file_name || cv.file_path || "No file path saved")}${cv.file_exists ? "" : " - file missing"}</p>
-          <div class="actions">
-            <button class="btn primary" onclick="selectCvVersion(${cv.id})">Edit</button>
-            ${cv.is_default ? "" : `<button class="btn" onclick="setDefaultCvVersion(${cv.id})">Set default</button>`}
-            ${cv.is_default ? "" : `<button class="btn warn" onclick="deleteCvVersion(${cv.id})">Delete</button>`}
-          </div>
-        </div>
-      `).join("") || `<p class="muted">No CV versions saved yet.</p>`;
-      drafts.innerHTML = apps.map(app => `
-        <div class="reminder">
-          <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
-          <div class="meta">Recommended CV: ${escapeHtml(app.recommended_cv_version || "not assessed yet")}</div>
-          <p class="muted">${escapeHtml((app.cv_notes || "").slice(0, 260) || "No CV notes generated yet.")}</p>
-          <details><summary>CV tailoring diff</summary>${cvTailoringDiffHtml(app)}</details>
-          <div class="actions">
-            <button class="btn primary" onclick="selectApplication(${app.id})">Open draft</button>
-            <button class="btn" onclick="showTab('applications')">Edit documents</button>
-          </div>
-        </div>
-      `).join("") || `<p class="muted">No active application drafts to tailor right now.</p>`;
-      artifacts.innerHTML = apps.map(app => {
-        const artifactEntries = Object.entries(app.document_artifacts || {}).filter(([key]) => !["cv_upload", "resume", "headshot", "photo"].includes(key));
-        return `
-          <div class="reminder">
-            <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
-            <div class="meta">${escapeHtml(app.documents_folder || "")}</div>
-            ${artifactEntries.length ? `
-              <ul>
-                ${artifactEntries.map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong>: ${escapeHtml(value)}</li>`).join("")}
-              </ul>
-            ` : `<p class="muted">No generated artifacts found yet for this draft.</p>`}
-            <div class="actions">
-              <button class="btn primary" onclick="selectApplication(${app.id})">Open draft</button>
-            </div>
-          </div>
-        `;
-      }).join("") || `<p class="muted">No generated document packs in the current batch.</p>`;
-      const cv = selectedCvVersion || cvVersions.find(item => item.is_default) || cvVersions[0] || {};
-      editor.innerHTML = `
-        <input id="cv_version_id" type="hidden" value="${escapeAttr(cv.id || "")}">
-        <label>Name</label><input id="cv_version_name" value="${escapeAttr(cv.name || "")}" placeholder="Graduate marketing CV">
-        <label>Focus</label><input id="cv_version_focus" value="${escapeAttr(cv.focus || "")}" placeholder="general marketing, content, sport">
-        <label>File path</label><input id="cv_version_file_path" value="${escapeAttr(cv.file_path || "")}" placeholder="/Users/phillip/Desktop/.../cv.pdf">
-        <label>Notes</label><textarea id="cv_version_notes" style="min-height:180px">${escapeHtml(cv.notes || "")}</textarea>
-        <label><input id="cv_version_is_default" type="checkbox" style="width:auto" ${cv.is_default ? "checked" : ""}> Set as default CV version</label>
-        <div class="actions">
-          <button class="btn primary" onclick="saveCvVersion()">Save CV version</button>
-          <button class="btn" onclick="clearCvVersionForm()">New CV version</button>
-          ${cv.id && !cv.is_default ? `<button class="btn warn" onclick="deleteCvVersion(${cv.id})">Delete</button>` : ""}
-        </div>
-      `;
-      profile.innerHTML = `
-        <p><strong>${escapeHtml(state.profile.full_name || "")}</strong></p>
-        <p class="meta">${escapeHtml(state.profile.location || "")}</p>
-        <p class="meta">${escapeHtml(state.profile.email || "")} - ${escapeHtml(state.profile.phone || "")}</p>
-        <p>${escapeHtml(state.profile.target_roles || "")}</p>
-      `;
-      voice.innerHTML = `
-        <p><strong>Email/CV voice</strong></p>
-        <p class="muted">${escapeHtml(state.profile.email_voice || "")}</p>
-        <p><strong>Writing style notes</strong></p>
-        <pre>${escapeHtml(state.profile.writing_style_notes || "No extracted style notes yet.")}</pre>
-      `;
-    }
-
-    function renderAtsScanner() {
-      const overview = document.getElementById("scannerOverview");
-      const appsTarget = document.getElementById("scannerApplications");
-      const hotspots = document.getElementById("scannerHotspots");
-      const platformsTarget = document.getElementById("scannerPlatforms");
-      if (!overview || !appsTarget || !hotspots || !platformsTarget) return;
-      const apps = currentBatchApplications();
-      const lowQuality = apps.filter(app => Number(app.quality_score || 0) < 70);
-      const flagged = apps.filter(app => (app.truthfulness_flags || "").trim());
-      const missingResearch = apps.filter(app => !(app.research_notes || "").trim());
-      overview.innerHTML = `
-        <div class="metric-grid">
-          ${metric("Scanned drafts", apps.length, "current batch")}
-          ${metric("Low quality", lowQuality.length, "quality score under 70")}
-          ${metric("Truth flags", flagged.length, "work authorization or truth checks")}
-          ${metric("Research gaps", missingResearch.length, "research still needed")}
-        </div>
-      `;
-      appsTarget.innerHTML = apps.map(app => `
-        ${(() => {
-          const job = appJob(app);
-          const missing = missingApplicationItems(app);
-          const coverage = draftKeywordCoverage(app, job);
-          const concerns = String(job.concerns || "").trim();
-          const flags = String(app.truthfulness_flags || "").trim();
-          const next = nextApplicationAction(app);
-          return `
-            <div class="reminder">
-              <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
-              <div class="meta">Quality ${escapeHtml(app.quality_score || 0)} - Recommended CV ${escapeHtml(app.recommended_cv_version || "no CV recommendation")} - Queue ${escapeHtml(queueStateLabel(app))}</div>
-              <p class="muted">${escapeHtml(next)}</p>
-              <div class="actions">
-                <button class="btn primary" onclick="selectApplication(${app.id})">Open draft</button>
-                <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
-                <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
-              </div>
-              <details open><summary>Scanner summary</summary>
-                <ul>
-                  <li><strong>Role fit:</strong> ${escapeHtml(concerns ? "review concerns first" : "no major fit concerns in current scoring")}</li>
-                  <li><strong>Missing items:</strong> ${escapeHtml(missing.length ? missing.join(", ") : "none outside manual submit checks")}</li>
-                  <li><strong>Truth flags:</strong> ${escapeHtml(flags || "none")}</li>
-                  <li><strong>Keyword coverage:</strong> ${escapeHtml(coverage.matched.length ? coverage.matched.join(", ") : "no strong keyword overlap detected yet")}</li>
-                  <li><strong>Missing keywords:</strong> ${escapeHtml(coverage.missing.length ? coverage.missing.join(", ") : "none from the top scanner keywords")}</li>
-                </ul>
-              </details>
-              <details><summary>Checklist</summary><pre>${escapeHtml(app.checklist || "No checklist generated yet.")}</pre></details>
-              <details><summary>Truthfulness / authorization flags</summary><pre>${escapeHtml(flags || "No truthfulness flags.")}</pre></details>
-              <details><summary>Quality notes</summary><pre>${escapeHtml(app.quality_notes || "No quality notes.")}</pre></details>
-              ${concerns ? `<details><summary>Fit concerns</summary><pre>${escapeHtml(concerns)}</pre></details>` : ""}
-            </div>
-          `;
-        })()}
-      `).join("") || `<p class="muted">No current batch to scan.</p>`;
-      hotspots.innerHTML = `
-        <div class="reminder">
-          <h3>What to fix first</h3>
-          <p class="muted">${lowQuality.length ? `${lowQuality.length} draft(s) need stronger tailoring.` : "No major quality-score issues in the current batch."}</p>
-          <p class="muted">${flagged.length ? `${flagged.length} draft(s) have truth/work-authorization flags to review manually.` : "No major truthfulness flags in the current batch."}</p>
-          <p class="muted">${missingResearch.length ? `${missingResearch.length} draft(s) still need company research.` : "Research coverage looks acceptable for the current batch."}</p>
-          <p class="muted">${apps.filter(app => safeForAutoApproval(app)).length} draft(s) look safe enough to move straight into Approved.</p>
-          <p class="muted">Top reject reasons: ${escapeHtml((state.rejection_reason_stats || []).slice(0, 4).map(item => `${item.reason} (${item.count})`).join(", ") || "none yet")}</p>
-        </div>
-      `;
-      platformsTarget.innerHTML = (state.ats_prep_stats || []).map(item => `
-        <div class="reminder">
-          <h3>${escapeHtml(item.platform || "custom")}</h3>
-          <div class="meta">
-            reports ${escapeHtml(item.reports || 0)} -
-            completion ${escapeHtml(item.completion_rate || 0)}% -
-            fill ${escapeHtml(item.fill_rate || 0)}%
-          </div>
-          <p class="muted">
-            started ${escapeHtml(item.started || 0)},
-            waiting ${escapeHtml(item.waiting || 0)},
-            restrictions ${escapeHtml(item.restrictions || 0)},
-            prompts ${escapeHtml(item.manual_prompts || 0)},
-            submitted ${escapeHtml(item.submitted || 0)}
-          </p>
-        </div>
-      `).join("") || `<p class="muted">No ATS prep stats yet.</p>`;
-    }
-
-    function renderInterviewPrep() {
-      const overview = document.getElementById("interviewPrepOverview");
-      const signals = document.getElementById("interviewPrepSignals");
-      const answers = document.getElementById("interviewPrepAnswers");
-      const stories = document.getElementById("interviewPrepStories");
-      if (!overview || !signals || !answers || !stories) return;
-      const apps = state.applications || [];
-      const interviewApps = apps.filter(app => ["interview", "offer"].includes(app.status));
-      const messages = state.inbox_messages || [];
-      const interviewSignals = messages.filter(item => item.classification === "interview");
-      overview.innerHTML = `
-        <div class="metric-grid">
-          ${metric("Interview-stage apps", interviewApps.length, "status interview/offer")}
-          ${metric("Inbox interview signals", interviewSignals.length, "reply tracking")}
-          ${metric("Answer bank", (state.answer_bank || []).length, "saved default answers")}
-          ${metric("Story bank", (state.story_bank || []).length, "proof stories")}
-        </div>
-      `;
-      signals.innerHTML = interviewSignals.map(item => `
-        <div class="reminder">
-          <h3>${escapeHtml(item.subject || "(no subject)")}</h3>
-          <div class="meta">${escapeHtml(item.from_name || "")} ${escapeHtml(item.from_email || "")}</div>
-          <pre>${escapeHtml(item.snippet || "")}</pre>
-        </div>
-      `).join("") || `<p class="muted">No interview signals tracked yet.</p>`;
-      answers.innerHTML = (state.answer_bank || []).slice(0, 10).map(item => `
-        <div class="reminder">
-          <h3>${escapeHtml(item.question || item.question_key || "Answer")}</h3>
-          <div class="meta">${escapeHtml(item.category || "")}</div>
-          <p>${escapeHtml(item.answer || "")}</p>
-        </div>
-      `).join("") || `<p class="muted">No saved interview/application answers yet.</p>`;
-      stories.innerHTML = (state.story_bank || []).slice(0, 10).map(item => `
-        <div class="reminder">
-          <h3>${escapeHtml(item.title || "Story")}</h3>
-          <div class="meta">${escapeHtml(item.category || "")}</div>
-          <p>${escapeHtml(item.story || "")}</p>
-          <p class="muted">${escapeHtml(item.proof_points || "")}</p>
-        </div>
-      `).join("") || `<p class="muted">No story bank entries yet.</p>`;
-    }
-
-    function dailyReviewApplications() {
-      const DONE = new Set(["rejected", "submitted", "interview", "offer"]);
-      return state.applications.filter(app => !DONE.has(app.status));
-    }
-
-    function appJob(app) {
-      return (state.jobs || []).find(job => Number(job.id) === Number(app.job_id)) || {};
-    }
-
-    function missingApplicationItems(app) {
-      const missing = [];
-      const job = appJob(app);
-      if (!app.url) missing.push("job URL");
-      if (!app.cover_letter) missing.push("cover letter");
-      if (!app.answers) missing.push("questionnaire answers");
-      if (!app.follow_up) missing.push("follow-up email");
-      if (!app.research_notes) missing.push("company research");
-      if (!app.company_notes) missing.push("personalization notes");
-      if (!app.contact_email) missing.push("contact email if available");
-      if (!app.contact_name) missing.push("contact name if available");
-      if (app.status === "submitted" && !app.next_follow_up) missing.push("follow-up date");
-      if ((job.concerns || "").trim()) missing.push("fit concerns to review");
-      return missing;
-    }
-
-    function nextApplicationAction(app) {
-      const missing = missingApplicationItems(app);
-      const requiredDraftMissing = !app.cover_letter || !app.answers || !app.follow_up;
-      if (isBoardPrepBlockedApp(app)) {
-        return "Click 'Fill in application form' — the tool will automatically find the real apply link for you.";
-      }
-      if (app.status === "submitted" && app.next_follow_up && !app.follow_up_sent_at && daysUntil(app.next_follow_up) <= 0) {
-        return "Send due follow-up.";
-      }
-      if (requiredDraftMissing) return "Regenerate or complete the draft.";
-      if (!app.company_notes) return "Open the draft and fill in the Company notes field (what stands out about this company/role), then regenerate the cover letter.";
-      if (!app.contact_email) return "Look for a recruiter/contact email, or proceed through the ATS only.";
-      if (app.status === "ready") return "Run Prepare form and review the browser fields.";
-      if (missing.length) return "Review missing details, then prepare the form.";
-      return "Ready for supervised form preparation.";
-    }
-
-    function renderDailyReview() {
-      const target = document.getElementById("dailyReview");
-      if (!target) return;
-      const apps = dailyReviewApplications();
-      if (!apps.length) {
-        target.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-icon">✅</div>
-            <h3>All clear!</h3>
-            <p>No applications waiting for your review. Run the workflow to pull in new roles.</p>
-            <div class="actions" style="justify-content:center">
-              <button class="btn primary" onclick="runDailyWorkflow()">Run today&apos;s workflow</button>
-              <button class="btn" onclick="showTab('discover')">Find Jobs</button>
-            </div>
-          </div>
-        `;
-        return;
-      }
-      const batchControls = apps.length > 1 ? `
-        <div class="actions" style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)">
-          <strong>${apps.length} application${apps.length === 1 ? "" : "s"} to review</strong>
-          <button class="btn" onclick="skipAllDailyReview()" style="margin-left:auto">Skip all</button>
-        </div>
-      ` : "";
-      target.innerHTML = batchControls + apps.map(app => {
-        const job = appJob(app);
-        const concerns = (job.concerns || "").trim();
-        const score = job.score ?? "n/a";
-        const location = app.location || job.location || "Location not listed";
-        return `
-          <div class="reminder" id="daily-card-${app.id}" style="margin-bottom:12px">
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-              <div>
-                <h3 style="margin-bottom:4px">${escapeHtml(app.company)}</h3>
-                <div style="font-weight:500;margin-bottom:4px">${escapeHtml(app.title)}</div>
-                <div class="meta">${escapeHtml(location)} &nbsp;·&nbsp; Score ${escapeHtml(String(score))}</div>
-              </div>
-              <button class="btn" style="flex-shrink:0;background:var(--soft);color:var(--muted);border-color:var(--line);min-width:unset;padding:4px 10px;font-size:12px" onclick="notInterestedFromDashboard(${app.id})" title="Remove this role">✕ Remove</button>
-            </div>
-            ${concerns ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Fit concerns</summary><pre style="margin-top:6px;font-size:12px">${escapeHtml(concerns)}</pre></details>` : ""}
-            ${isBoardPrepBlockedApp(app) ? `<p class="muted" style="font-size:12px;margin-top:8px">Click 'Fill in application form' — the tool will find the real apply link automatically.</p>` : ""}
-            <div class="actions" style="margin-top:10px">
-              <button class="btn primary" onclick="prepareApplicationFromDashboard(${app.id})"><i data-lucide="external-link"></i> Fill in application form</button>
-              <button class="btn warn" onclick="markApplicationSubmittedFromDashboard(${app.id})">I applied for this</button>
-              <button class="btn" onclick="selectApplication(${app.id})">Edit draft</button>
-              ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer" style="font-size:12px">Open job</a>` : ""}
-            </div>
-          </div>
-        `;
-      }).join("");
-      if (window.lucide) lucide.createIcons();
-    }
-
-    function followUpReminders() {
-      return state.applications
-        .filter(app => app.status === "submitted" && app.next_follow_up && !app.follow_up_sent_at)
-        .map(app => ({...app, daysUntil: daysUntil(app.next_follow_up)}))
-        .sort((a, b) => a.daysUntil - b.daysUntil);
-    }
-
-    function daysUntil(dateText) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const target = new Date(`${dateText}T00:00:00`);
-      return Math.ceil((target - today) / 86400000);
-    }
-
-    function followUpLabel(app) {
-      if (app.follow_up_sent_at) return `Follow-up sent ${formatDate(app.follow_up_sent_at.slice(0, 10))}`;
-      if (!app.next_follow_up) return "Follow-up not scheduled";
-      const days = daysUntil(app.next_follow_up);
-      if (days > 1) return `Follow-up in ${days} days`;
-      if (days === 1) return "Follow-up tomorrow";
-      if (days === 0) return "Follow-up due today";
-      return `Follow-up overdue by ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"}`;
-    }
-
-    function renderReminderList(reminders) {
-      if (!reminders.length) return `<p class="muted">No submitted applications waiting for follow-up.</p>`;
-      return reminders.slice(0, 8).map(app => {
-        const dueClass = app.daysUntil <= 0 ? "bad" : app.daysUntil <= 2 ? "ok" : "muted";
-        return `
-          <div class="reminder">
-            <h3>${escapeHtml(app.company)} - ${escapeHtml(app.title)}</h3>
-            <p class="${dueClass}">${escapeHtml(followUpLabel(app))}</p>
-            <div class="actions">
-              <button class="btn primary" onclick="selectApplication(${app.id})">Review</button>
-              <button class="btn" onclick="sendFollowUpFor(${app.id})">Send follow-up</button>
-            </div>
-          </div>
-        `;
-      }).join("");
-    }
-
-    function showReminderPopup(reminders) {
-      if (reminderPopupShown) return;
-      const due = reminders.filter(app => app.daysUntil <= 0);
-      if (!due.length) return;
-      reminderPopupShown = true;
-      setTimeout(() => {
-        alert(`${due.length} follow-up email${due.length === 1 ? " is" : "s are"} due today or overdue. Open the Dashboard or Applications tab to review and send.`);
-      }, 300);
-    }
-
-    function formatDate(dateText) {
-      if (!dateText) return "";
-      return dateText;
-    }
-
-    function domainFromUrl(url) {
-      try {
-        return new URL(url).hostname.replace(/^www\./, "");
-      } catch (error) {
-        return "";
-      }
-    }
-
-    function activeBlockedDomain(url) {
-      const domain = domainFromUrl(url);
-      if (!domain) return null;
-      return (state.blocked_domains || []).find(item => {
-        const blocked = String(item.domain || "");
-        return blocked && (domain === blocked || domain.endsWith(`.${blocked}`) || blocked.endsWith(`.${domain}`));
-      }) || null;
-    }
-
-    function activeThrottledDomain(url) {
-      const domain = domainFromUrl(url);
-      if (!domain) return null;
-      return (state.throttled_domains || []).find(item => {
-        const limited = String(item.domain || "");
-        return limited && (domain === limited || domain.endsWith(`.${limited}`) || limited.endsWith(`.${domain}`));
-      }) || null;
-    }
-
-    function blockedDomainSummaryHtml() {
-      const items = state.blocked_domains || [];
-      if (!items.length) return `<p class="muted">No ATS cooldowns are active.</p>`;
-      return items.map(item => `
-        <div class="reminder">
-          <h3>${escapeHtml(item.domain || "Blocked ATS")}</h3>
-          <div class="meta">${escapeHtml(item.platform || "platform")} - until ${escapeHtml(item.blocked_until || "")}</div>
-          <p class="bad">${escapeHtml(item.message || "Platform restriction detected.")}</p>
-          <p class="muted">${escapeHtml(item.company || "")}${item.title ? ` - ${escapeHtml(item.title)}` : ""}</p>
-        </div>
-      `).join("");
-    }
-
-    function throttledDomainSummaryHtml() {
-      const items = state.throttled_domains || [];
-      if (!items.length) return `<p class="muted">No ATS rate limits are active.</p>`;
-      return items.map(item => `
-        <div class="reminder">
-          <h3>${escapeHtml(item.domain || "ATS throttle")}</h3>
-          <div class="meta">${escapeHtml(item.platform || "platform")} - next try after ${escapeHtml(item.next_allowed_at || "")}</div>
-          <p class="muted">${escapeHtml(item.message || "Recent form preparation attempt detected.")}</p>
-          <p class="muted">${escapeHtml(item.company || "")}${item.title ? ` - ${escapeHtml(item.title)}` : ""}</p>
-        </div>
-      `).join("");
-    }
-
-    function renderEmail() {
-      const cfg = state.email || {};
-      const inbox = state.inbox || {};
-      document.getElementById("email_host").value = cfg.host || "smtp.mweb.co.za";
-      document.getElementById("email_port").value = cfg.port || "587";
-      document.getElementById("email_user").value = cfg.user || state.profile.email || "";
-      document.getElementById("email_from").value = cfg.from || state.profile.email || "";
-      document.getElementById("email_to").value = cfg.to || state.profile.email || "";
-      document.getElementById("email_starttls").checked = String(cfg.starttls ?? "1") !== "0";
-      document.getElementById("inbox_host").value = inbox.host || "imap.mweb.co.za";
-      document.getElementById("inbox_port").value = inbox.port || "993";
-      document.getElementById("inbox_user").value = inbox.user || state.profile.email || "";
-      document.getElementById("inbox_mailbox").value = inbox.mailbox || "INBOX";
-      document.getElementById("inbox_lookback_days").value = inbox.lookback_days || "45";
-      document.getElementById("inbox_ssl").checked = String(inbox.ssl ?? "1") !== "0";
-      document.getElementById("emailStatus").innerHTML = `
-        <p><strong>Host:</strong> ${escapeHtml(cfg.host || "not set")}</p>
-        <p><strong>User:</strong> ${escapeHtml(cfg.user || "not set")}</p>
-        <p><strong>From:</strong> ${escapeHtml(cfg.from || "not set")}</p>
-        <p><strong>Password:</strong> ${cfg.password_set ? '<span class="ok">saved locally</span>' : '<span class="bad">not saved</span>'}</p>
-      `;
-      document.getElementById("inboxStatus").innerHTML = `
-        <p><strong>Inbox host:</strong> ${escapeHtml(inbox.host || "not set")}</p>
-        <p><strong>Inbox user:</strong> ${escapeHtml(inbox.user || "not set")}</p>
-        <p><strong>Mailbox:</strong> ${escapeHtml(inbox.mailbox || "INBOX")}</p>
-        <p><strong>Password:</strong> ${inbox.password_set ? '<span class="ok">saved locally</span>' : '<span class="bad">not saved</span>'}</p>
-      `;
-      renderInboxMessages();
-    }
-
-    function renderInboxMessages() {
-      const messages = state.inbox_messages || [];
-      const target = document.getElementById("inboxMessages");
-      if (!target) return;
-      if (!messages.length) {
-        target.innerHTML = `<p class="muted">No tracked replies yet. Save inbox settings, then scan your inbox.</p>`;
-        return;
-      }
-      target.innerHTML = messages.map(item => {
-        const match = item.matched_type === "application"
-          ? `${item.application_company || "Application"} - ${item.application_title || ""}`
-          : item.matched_type === "outreach"
-            ? `${item.lead_company || "Outreach lead"}`
-            : "No confident match";
-        const actionButtons = inboxActionButtons(item);
-        return `
-          <article class="job">
-            <div>
-              <span class="tag">${escapeHtml(item.classification || "unknown")}</span>
-              <span class="tag">${escapeHtml(item.status || "new")}</span>
-              <span class="tag">${escapeHtml(String(item.confidence || 0))}%</span>
-            </div>
-            <div>
-              <h3>${escapeHtml(item.subject || "(no subject)")}</h3>
-              <div class="meta">${escapeHtml(item.from_name || "")} ${escapeHtml(item.from_email || "")} - ${escapeHtml(item.received_at || "")}</div>
-              <div class="meta">Match: ${escapeHtml(match)}</div>
-              <pre>${escapeHtml(item.snippet || "")}</pre>
-              <div class="actions">
-                ${actionButtons}
-                <button class="btn" onclick="matchInboxToApplication(${item.id})">Match application</button>
-                <button class="btn" onclick="matchInboxToLead(${item.id})">Match outreach</button>
-                <button class="btn" onclick="markInbox(${item.id}, 'reviewed')">Mark reviewed</button>
-                <button class="btn" onclick="markInbox(${item.id}, 'ignored')">Ignore</button>
-              </div>
-            </div>
-          </article>
-        `;
-      }).join("");
-    }
-
-    function inboxActionButtons(item) {
-      if (item.matched_type === "application" && item.application_id) {
-        const interview = `<button class="btn primary" onclick="markInbox(${item.id}, 'handled', 'interview')">Mark interview</button>`;
-        const rejected = `<button class="btn warn" onclick="markInbox(${item.id}, 'handled', 'rejected')">Mark rejected</button>`;
-        return `${item.classification === "interview" ? interview : ""}${item.classification === "rejection" ? rejected : ""}`;
-      }
-      if (item.matched_type === "outreach" && item.lead_id) {
-        return `<button class="btn primary" onclick="markInbox(${item.id}, 'handled', '', 'replied')">Mark outreach replied</button>`;
-      }
-      return "";
-    }
-
-    async function renderSearchLinks() {
-      const links = await api("/api/open-searches");
-      const html = Object.entries(links).map(([label, url]) => `<p><a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a></p>`).join("");
-      document.getElementById("searchLinks").innerHTML = html;
-      document.getElementById("discoverLinks").innerHTML = html;
-    }
-
-    function renderJobs() {
-      const filter = document.getElementById("job_filter")?.value || "";
-      const jobs = state.jobs.filter(job => !filter || job.status === filter);
-      document.getElementById("jobList").innerHTML = jobs.map(job => {
-        const scoreClass = job.score < 35 ? "low" : job.score < 60 ? "mid" : "";
-        return `
-          <article class="job">
-            <div class="score ${scoreClass}">${job.score}</div>
-            <div>
-              <h3>${escapeHtml(job.title)}</h3>
-              <div class="meta">${escapeHtml(job.company)} - ${escapeHtml(job.location || "Location not listed")}</div>
-              <div>
-                <span class="tag">${escapeHtml(job.status)}</span>
-                <span class="tag">${escapeHtml(job.source)}</span>
-                ${job.too_senior ? `<span class="tag">too senior</span>` : ""}
-              </div>
-              ${job.url ? `<p class="meta"><a href="${escapeAttr(job.url)}" target="_blank" rel="noreferrer">${escapeHtml(job.url)}</a></p>` : ""}
-              <pre>${escapeHtml(job.score_reasons || "")}${job.concerns ? "\n\nConcerns:\n" + escapeHtml(job.concerns) : ""}</pre>
-              <details><summary>Description</summary><pre>${escapeHtml(job.description || "")}</pre></details>
-              <div class="actions">
-                <button class="btn" onclick="setJobStatus(${job.id}, 'shortlisted')">Pick for review</button>
-                <button class="btn primary" onclick="generateApplication(${job.id})">Create application draft</button>
-                <button class="btn" onclick="setTooSenior(${job.id}, ${job.too_senior ? "false" : "true"})">${job.too_senior ? "Allow again" : "Too senior for me"}</button>
-                <button class="btn" onclick="setJobStatus(${job.id}, 'applied')">Mark applied</button>
-                <button class="btn" onclick="setJobStatus(${job.id}, 'rejected')">Reject</button>
-              </div>
-            </div>
-          </article>`;
-      }).join("") || `<p class="muted">No jobs in this view.</p>`;
-    }
-
-    function renderSources() {
-      const sources = state.sources || [];
-      const target = document.getElementById("sourceList");
-      if (!target) return;
-      target.innerHTML = sources.map(source => {
-        let last = "never run";
-        if (source.last_run) last = `last run ${source.last_run.slice(0, 10)}`;
-        return `
-          <div class="reminder">
-            <h3>${escapeHtml(source.name || `${source.source_type}:${source.token}`)}</h3>
-            <div class="meta">${escapeHtml(source.source_type)} - ${escapeHtml(source.token)} - ${escapeHtml(source.enabled ? "enabled" : "paused")}</div>
-            <div class="meta">${escapeHtml(last)}</div>
-            ${source.last_result ? `<pre>${escapeHtml(source.last_result)}</pre>` : ""}
-            <div class="actions">
-              <button class="btn primary" onclick="runSource(${source.id})">Run now</button>
-              <button class="btn" onclick="toggleSource(${source.id}, ${source.enabled ? "false" : "true"})">${source.enabled ? "Pause" : "Enable"}</button>
-            </div>
-          </div>
-        `;
-      }).join("") || `<p class="muted">No automatic sources saved yet.</p>`;
-    }
-
-    function sourceResult(source) {
-      try {
-        return JSON.parse(source.last_result || "{}");
-      } catch {
-        return {raw: source.last_result || ""};
-      }
-    }
-
-    function renderSourceHealth() {
-      const sources = state.sources || [];
-      const targets = ["dashboardSourceHealth", "discoverSourceHealth"]
-        .map(id => document.getElementById(id))
-        .filter(Boolean);
-      if (!targets.length) return;
-      const enabled = sources.filter(source => source.enabled).length;
-      const errors = sources.filter(source => {
-        const result = sourceResult(source);
-        return Boolean(result.error);
-      });
-      const cards = sources.slice().sort((a, b) => {
-        const aError = sourceResult(a).error ? 1 : 0;
-        const bError = sourceResult(b).error ? 1 : 0;
-        return bError - aError || Number(b.enabled) - Number(a.enabled);
-      }).slice(0, 8).map(source => {
-        const result = sourceResult(source);
-        const ok = !result.error && source.last_run;
-        const count = Number(result.count || 0);
-        const status = result.error ? "error" : ok ? `${count} jobs` : "not run";
-        const cls = result.error ? "bad" : ok ? "ok" : "muted";
-        return `
-          <div class="reminder">
-            <h3>${escapeHtml(source.name || source.token)}</h3>
-            <div class="meta">${escapeHtml(source.source_type)} - ${escapeHtml(source.enabled ? "enabled" : "paused")} - ${escapeHtml(source.last_run ? source.last_run.slice(0, 10) : "never run")}</div>
-            <p class="${cls}">${escapeHtml(status)}</p>
-            ${result.error ? `<pre>${escapeHtml(result.error)}</pre>` : ""}
-            <div class="actions">
-              <button class="btn" onclick="runSource(${source.id})">Run</button>
-              <button class="btn" onclick="toggleSource(${source.id}, ${source.enabled ? "false" : "true"})">${source.enabled ? "Pause" : "Enable"}</button>
-            </div>
-          </div>
-        `;
-      }).join("");
-      const html = `
-        <p><strong>${enabled}</strong> enabled sources. <strong>${errors.length}</strong> source${errors.length === 1 ? "" : "s"} with visible errors.</p>
-        ${cards || `<p class="muted">No sources saved yet.</p>`}
-      `;
-      for (const target of targets) target.innerHTML = html;
-    }
-
-    function renderAnalytics() {
-      if (!document.getElementById("analyticsOverview")) return;
-      const jobs = state.jobs || [];
-      const apps = state.applications || [];
-      const leads = state.leads || [];
-      const messages = state.inbox_messages || [];
-      const followups = followUpReminders();
-      const submitted = apps.filter(app => ["submitted", "interview", "offer"].includes(app.status));
-      const responses = apps.filter(app => ["interview", "offer"].includes(app.status));
-      const rejected = apps.filter(app => app.status === "rejected");
-      const replyMatches = messages.filter(item => item.matched_type && Number(item.confidence || 0) >= 40);
-      const interviews = messages.filter(item => item.classification === "interview");
-      const strongJobs = jobs.filter(job => Number(job.score || 0) >= 55);
-      const avgScore = jobs.length ? Math.round(jobs.reduce((sum, job) => sum + Number(job.score || 0), 0) / jobs.length) : 0;
-      document.getElementById("analyticsOverview").innerHTML = `
-        <div class="metric-grid">
-          ${metric("Jobs", jobs.length, `${strongJobs.length} strong fits`)}
-          ${metric("Drafts", apps.length, `${submitted.length} submitted`)}
-          ${metric("Responses", responses.length, `${responseRate(responses.length, submitted.length)} response rate`)}
-          ${metric("Inbox matches", replyMatches.length, `${interviews.length} interview signal(s)`)}
-          ${metric("Avg score", avgScore, `${rejected.length} rejected`)}
-        </div>
-      `;
-      renderAnalyticsFunnel(apps);
-      renderAnalyticsSources(jobs, apps);
-      renderAnalyticsFollowups(followups, apps, leads);
-      renderAnalyticsReplies(messages, apps);
-      renderAnalyticsRecommendations(jobs, apps, followups, messages);
-    }
-
-    function metric(label, value, detail) {
-      return `<div class="metric"><strong>${escapeHtml(value)}</strong><div>${escapeHtml(label)}</div><div class="meta">${escapeHtml(detail)}</div></div>`;
-    }
-
-    function responseRate(count, submitted) {
-      if (!submitted) return "0%";
-      return `${Math.round((count / submitted) * 100)}%`;
-    }
-
-    function countBy(items, fn) {
-      const out = {};
-      for (const item of items) {
-        const key = fn(item) || "unknown";
-        out[key] = (out[key] || 0) + 1;
-      }
-      return out;
-    }
-
-    function renderAnalyticsFunnel(apps) {
-      const statuses = ["draft", "ready", "submitted", "interview", "offer", "rejected"];
-      const counts = countBy(apps, app => app.status || "draft");
-      document.getElementById("analyticsFunnel").innerHTML = `
-        <table>
-          <thead><tr><th>Status</th><th>Count</th><th>Action</th></tr></thead>
-          <tbody>
-            ${statuses.map(status => {
-              const count = counts[status] || 0;
-              const action = status === "draft" ? "Review and prepare"
-                : status === "ready" ? "Open form"
-                : status === "submitted" ? "Track follow-up"
-                : status === "interview" ? "Prepare notes"
-                : status === "offer" ? "Assess fit"
-                : "Learn and refine";
-              return `<tr><td>${escapeHtml(status)}</td><td>${count}</td><td>${escapeHtml(action)}</td></tr>`;
-            }).join("")}
-          </tbody>
-        </table>
-      `;
-    }
-
-    function renderAnalyticsSources(jobs, apps) {
-      const appsByJob = Object.fromEntries(apps.map(app => [Number(app.job_id), app]));
-      const sourceRows = Object.values(jobs.reduce((acc, job) => {
-        const key = job.source || "unknown";
-        if (!acc[key]) acc[key] = {source: key, jobs: 0, score: 0, strong: 0, drafts: 0, submitted: 0, responses: 0, errors: 0};
-        const row = acc[key];
-        row.jobs += 1;
-        row.score += Number(job.score || 0);
-        if (Number(job.score || 0) >= 55) row.strong += 1;
-        if ((job.concerns || "").toLowerCase().includes("potential scam")) row.errors += 1;
-        const app = appsByJob[Number(job.id)];
-        if (app) {
-          row.drafts += 1;
-          if (["submitted", "interview", "offer"].includes(app.status)) row.submitted += 1;
-          if (["interview", "offer"].includes(app.status)) row.responses += 1;
-        }
-        return acc;
-      }, {})).map(row => ({...row, avg: row.jobs ? Math.round(row.score / row.jobs) : 0}))
-        .sort((a, b) => b.strong - a.strong || b.avg - a.avg)
-        .slice(0, 12);
-
-      document.getElementById("analyticsSources").innerHTML = `
-        <table>
-          <thead><tr><th>Source</th><th>Jobs</th><th>Avg</th><th>Strong</th><th>Drafts</th><th>Submitted</th><th>Responses</th></tr></thead>
-          <tbody>
-            ${sourceRows.map(row => `
-              <tr>
-                <td>${escapeHtml(row.source)}</td>
-                <td>${row.jobs}</td>
-                <td>${row.avg}</td>
-                <td>${row.strong}</td>
-                <td>${row.drafts}</td>
-                <td>${row.submitted}</td>
-                <td>${row.responses}</td>
-              </tr>
-            `).join("") || `<tr><td colspan="7" class="muted">No source data yet.</td></tr>`}
-          </tbody>
-        </table>
-      `;
-    }
-
-    function renderAnalyticsFollowups(followups, apps, leads) {
-      const overdue = followups.filter(item => item.daysUntil < 0).length;
-      const dueToday = followups.filter(item => item.daysUntil === 0).length;
-      const upcoming = followups.filter(item => item.daysUntil > 0).length;
-      const outreachSent = leads.filter(lead => lead.status === "sent").length;
-      document.getElementById("analyticsFollowups").innerHTML = `
-        <div class="metric-grid">
-          ${metric("Overdue", overdue, "send or reschedule")}
-          ${metric("Due today", dueToday, "review first")}
-          ${metric("Upcoming", upcoming, "scheduled follow-ups")}
-          ${metric("Outreach sent", outreachSent, "company leads")}
-        </div>
-        ${renderReminderList(followups)}
-      `;
-    }
-
-    function renderAnalyticsReplies(messages, apps) {
-      const counts = countBy(messages, item => item.classification || "unknown");
-      const matched = messages.filter(item => item.matched_type && Number(item.confidence || 0) >= 40);
-      const interviews = messages.filter(item => item.classification === "interview");
-      const rejections = messages.filter(item => item.classification === "rejection");
-      const autoReplies = messages.filter(item => item.classification === "auto_reply");
-      const byMatch = countBy(matched, item => item.matched_type || "unmatched");
-      const target = document.getElementById("analyticsReplies");
-      if (!target) return;
-      target.innerHTML = `
-        <div class="metric-grid">
-          ${metric("Tracked replies", messages.length, `${matched.length} matched`)}
-          ${metric("Interview signals", interviews.length, "from inbox")}
-          ${metric("Rejections", rejections.length, "from inbox")}
-          ${metric("Auto replies", autoReplies.length, "confirmations")}
-        </div>
-        <table>
-          <thead><tr><th>Classification</th><th>Count</th></tr></thead>
-          <tbody>
-            ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name, count]) => `<tr><td>${escapeHtml(name)}</td><td>${count}</td></tr>`).join("") || `<tr><td colspan="2" class="muted">No inbox replies tracked yet.</td></tr>`}
-          </tbody>
-        </table>
-        <p class="meta">Matched applications: ${escapeHtml(String(byMatch.application || 0))}. Matched outreach: ${escapeHtml(String(byMatch.outreach || 0))}.</p>
-      `;
-    }
-
-    function renderAnalyticsRecommendations(jobs, apps, followups, messages = []) {
-      const recommendations = [];
-      const targetCount = (state.targets || []).length;
-      const drafts = apps.filter(app => app.status === "draft").length;
-      const submitted = apps.filter(app => ["submitted", "interview", "offer"].includes(app.status)).length;
-      const strong = jobs.filter(job => Number(job.score || 0) >= 55 && ["new", "shortlisted"].includes(job.status)).length;
-      const sourceErrors = (state.sources || []).filter(source => sourceResult(source).error);
-      const inbox = state.inbox || {};
-      const unreviewedReplies = messages.filter(item => item.status === "new" && item.classification !== "auto_reply").length;
-      if (targetCount < 20) recommendations.push("Add more target companies so the system can search brands Phillip actually wants.");
-      if (sourceErrors.length) recommendations.push(`Fix or pause ${sourceErrors.length} failing source(s), starting with ${sourceErrors[0].name || sourceErrors[0].token}.`);
-      if (strong >= 5 && drafts < 5) recommendations.push("Generate drafts from the strongest queued jobs.");
-      if (drafts >= 5 && submitted < 5) recommendations.push("Use Daily Review to turn drafts into submitted applications.");
-      if (followups.some(item => item.daysUntil <= 0)) recommendations.push("Send due follow-ups before adding more applications.");
-      if (!inbox.password_set) recommendations.push("Save the IMAP password in Inbox Reply Tracking so replies can be tracked.");
-      if (unreviewedReplies) recommendations.push(`Review ${unreviewedReplies} new inbox repl${unreviewedReplies === 1 ? "y" : "ies"} before sending more outreach.`);
-      if (!recommendations.length) recommendations.push("System looks balanced. Keep adding target companies and run the daily workflow.");
-      document.getElementById("analyticsRecommendations").innerHTML = recommendations.map(item => `<div class="reminder">${escapeHtml(item)}</div>`).join("");
-    }
-
-    function renderAutoMode() {
-      if (!document.getElementById("automationRuns")) return;
-      const runs = state.automation_runs || [];
-      document.getElementById("automationRuns").innerHTML = runs.map(run => `
-        <div class="reminder">
-          <h3>${escapeHtml(run.kind || "auto-mode")} - ${escapeHtml((run.created_at || "").slice(0, 19))}</h3>
-          <p>${escapeHtml(run.summary || "")}</p>
-        </div>
-      `).join("") || `<p class="muted">No automation runs yet.</p>`;
-
-      const cvs = state.cv_versions || [];
-      document.getElementById("cvVersionList").innerHTML = cvs.map(cv => `
-        <div class="reminder">
-          <h3>${escapeHtml(cv.name || "CV version")}</h3>
-          <div class="meta">${escapeHtml(cv.focus || "")}${cv.is_default ? " - default" : ""}</div>
-          <p>${escapeHtml(cv.notes || "")}</p>
-        </div>
-      `).join("") || `<p class="muted">No CV versions seeded yet.</p>`;
-
-      const answers = state.answer_bank || [];
-      document.getElementById("answerBankList").innerHTML = answers.slice(0, 10).map(answer => `
-        <details class="reminder">
-          <summary>${escapeHtml(answer.question || answer.question_key || "Answer")}</summary>
-          <pre>${escapeHtml(answer.answer || "")}</pre>
-        </details>
-      `).join("") || `<p class="muted">No answer bank items yet.</p>`;
-
-      const stories = state.story_bank || [];
-      document.getElementById("storyBankList").innerHTML = stories.map(story => `
-        <details class="reminder">
-          <summary>${escapeHtml(story.title || "Story")}</summary>
-          <p>${escapeHtml(story.story || "")}</p>
-          <pre>${escapeHtml(story.proof_points || "")}</pre>
-        </details>
-      `).join("") || `<p class="muted">No story bank items yet.</p>`;
-
-      const feedbackTarget = document.getElementById("formFeedbackSummary");
-      if (feedbackTarget) {
-        const feedback = state.form_feedback || [];
-        const recs = state.form_feedback_recommendations || [];
-        feedbackTarget.innerHTML = `
-          ${recs.length ? `<h3>Mapping recommendations</h3>${recs.map(rec => `<div class="reminder">${escapeHtml(rec)}</div>`).join("")}` : `<p class="muted">No feedback recommendations yet.</p>`}
-          <h3>Latest feedback</h3>
-          ${feedback.slice(0, 8).map(item => `
-            <details class="reminder">
-              <summary>${escapeHtml(item.company || "")} - ${escapeHtml(item.title || "")}</summary>
-              <pre>Worked: ${escapeHtml(item.worked || "")}
-
-Missed: ${escapeHtml(item.missed || "")}
-
-Wrong: ${escapeHtml(item.wrong || "")}
-
-Notes: ${escapeHtml(item.notes || "")}</pre>
-            </details>
-          `).join("") || `<p class="muted">No form-fill feedback saved yet.</p>`}
-        `;
-      }
-
-      const cleanupTarget = document.getElementById("sourceCleanup");
-      if (cleanupTarget) {
-        const recs = state.source_cleanup || [];
-        cleanupTarget.innerHTML = recs.map(rec => `
-          <div class="reminder">
-            <h3>${escapeHtml(rec.name || rec.token || "Source")}</h3>
-            <div class="meta">${escapeHtml(rec.source_type || "")} - ${escapeHtml(rec.enabled ? "enabled" : "paused")}</div>
-            <p class="${rec.action === "pause-or-fix" ? "bad" : "muted"}">${escapeHtml(rec.reason || "")}</p>
-            <div class="actions">
-              <button class="btn" onclick="toggleSource(${rec.id}, false)">Pause</button>
-              <button class="btn" onclick="runSource(${rec.id})">Run again</button>
-            </div>
-          </div>
-        `).join("") || `<p class="muted">No source cleanup recommendations.</p>`;
-      }
-    }
-
-    function renderApplications() {
-      const list = document.getElementById("applicationList");
-      const blockedTarget = document.getElementById("applicationDomainBlocks");
-      const viewMode = document.getElementById("application_view_mode")?.value || "current";
-      const completedStatuses = new Set(["submitted", "interview", "offer", "rejected"]);
-      const activeApps = (state.applications || []).filter(app => !completedStatuses.has(String(app.status || "draft")));
-      const actionableActiveApps = activeApps.filter(isActionableApplication);
-      const hiddenActionlessCount = activeApps.length - actionableActiveApps.length;
-      const latestBatchId = actionableActiveApps.reduce((latest, app) => {
-        const batchId = String(app.batch_id || "");
-        if (!batchId) return latest;
-        return !latest || batchId > latest ? batchId : latest;
-      }, "");
-      const visibleApps = viewMode === "all"
-        ? (state.applications || [])
-        : viewMode === "active"
-          ? actionableActiveApps
-          : latestBatchId
-            ? actionableActiveApps.filter(app => String(app.batch_id || "") === latestBatchId)
-            : actionableActiveApps.slice(0, 5);
-      if (blockedTarget) {
-        const blocked = state.blocked_domains || [];
-        const throttled = state.throttled_domains || [];
-        const notices = [];
-        if (hiddenActionlessCount && viewMode !== "all") {
-          notices.push(`<div class="notice"><strong>${hiddenActionlessCount} draft(s) hidden here.</strong><br>They do not have a usable apply page yet.</div>`);
-        }
-        if (blocked.length) {
-          notices.push(`<div class="notice bad"><strong>ATS cooldowns active.</strong><br>Some sites need a wait before the next try.</div>${blockedDomainSummaryHtml()}`);
-        }
-        if (throttled.length) {
-          notices.push(`<div class="notice"><strong>ATS pacing limits active.</strong><br>Some sites are being slowed on purpose.</div>${throttledDomainSummaryHtml()}`);
-        }
-        blockedTarget.innerHTML = notices.join("");
-      }
-      list.innerHTML = visibleApps.map(app => `
-        <div class="panel">
-          <h3>${escapeHtml(app.title)}</h3>
-          <div class="meta">${escapeHtml(app.company)} - ${escapeHtml(followUpLabel(app))}</div>
-          <div class="meta">${escapeHtml(contactSummary(app))}</div>
-          ${activeBlockedDomain(app.url) ? `<p class="bad">Paused until ${escapeHtml(activeBlockedDomain(app.url).blocked_until || "")}.</p>` : ""}
-          ${!activeBlockedDomain(app.url) && activeThrottledDomain(app.url) ? `<p class="muted">Try again after ${escapeHtml(activeThrottledDomain(app.url).next_allowed_at || "")}.</p>` : ""}
-          <div>
-            ${app.research_notes ? `<span class="tag">research saved</span>` : `<span class="tag">research needed</span>`}
-            <span class="tag">quality ${escapeHtml(app.quality_score || 0)}</span>
-            <span class="tag">${escapeHtml(queueStateLabel(app))}</span>
-            ${isBoardPrepBlockedApp(app) ? `<span class="tag">needs direct apply link</span>` : ""}
-            ${app.manual_first ? `<span class="tag">manual-first ATS</span>` : ""}
-            ${activeBlockedDomain(app.url) ? `<span class="tag">ats cooldown</span>` : ""}
-            ${!activeBlockedDomain(app.url) && activeThrottledDomain(app.url) ? `<span class="tag">ats rate limit</span>` : ""}
-            ${app.form_prep_started_at ? `<span class="tag">form prep ${escapeHtml(app.form_prep_report?.status || "started")}</span>` : ""}
-            ${app.recommended_cv_version ? `<span class="tag">${escapeHtml(app.recommended_cv_version)}</span>` : ""}
-          </div>
-          ${isBoardPrepBlockedApp(app) ? `<p class="muted">Click 'Fill in application form' — the tool will find the real apply link automatically.</p>` : ""}
-          <div class="actions">
-            <button class="btn" onclick="setApplicationQueueState(${app.id}, 'approved')">Approve</button>
-            <button class="btn" onclick="setApplicationQueueState(${app.id}, 'hold')">Hold</button>
-            <button class="btn primary" onclick="selectApplication(${app.id})">Edit</button>
-            ${isBoardPrepBlockedApp(app) ? "" : `<button class="btn" onclick="prepareApplicationCard(${app.id})">Fill in application form</button>`}
-            ${isBoardPrepBlockedApp(app) ? "" : `<button class="btn" onclick="resumeApplicationCard(${app.id})">Continue filling form</button>`}
-            <button class="btn warn" onclick="rejectApplicationFromCard(${app.id})">Skip this role</button>
-            ${app.url ? `<a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noreferrer">${isBoardPrepBlockedApp(app) ? "Open listing" : "Open job"}</a>` : ""}
-            <a class="btn" href="${mailto(app)}">Email draft</a>
-          </div>
-        </div>
-      `).join("") || `<p class="muted">No application drafts in this view.</p>`;
-      renderSiteCredentials();
-      if (selectedApplication) selectApplication(selectedApplication.id, false);
-    }
-
-    function currentApplicationDomain() {
-      if (!selectedApplication || !selectedApplication.url) return "";
-      try {
-        return new URL(selectedApplication.url).hostname.replace(/^www\./, "");
-      } catch {
-        return "";
-      }
-    }
-
-    function clearSiteCredentialForm() {
-      document.getElementById("credential_id").value = "";
-      document.getElementById("credential_domain").value = currentApplicationDomain();
-      document.getElementById("credential_login_url").value = "";
-      document.getElementById("credential_username").value = state.profile.email || "";
-      document.getElementById("credential_password").value = "";
-      document.getElementById("credential_notes").value = "";
-      document.getElementById("credential_enabled").checked = true;
-    }
-
-    function editSiteCredential(id) {
-      const credential = (state.site_credentials || []).find(item => Number(item.id) === Number(id));
-      if (!credential) return;
-      document.getElementById("credential_id").value = credential.id || "";
-      document.getElementById("credential_domain").value = credential.domain || "";
-      document.getElementById("credential_login_url").value = credential.login_url || "";
-      document.getElementById("credential_username").value = credential.username || "";
-      document.getElementById("credential_password").value = "";
-      document.getElementById("credential_notes").value = credential.notes || "";
-      document.getElementById("credential_enabled").checked = Boolean(credential.enabled);
-      showTab("applications");
-    }
-
-    function renderSiteCredentials() {
-      const target = document.getElementById("siteCredentialList");
-      if (!target) return;
-      const credentials = state.site_credentials || [];
-      const suggestedDomain = currentApplicationDomain();
-      target.innerHTML = `
-        ${suggestedDomain ? `<p class="muted">Suggested domain from selected application: <strong>${escapeHtml(suggestedDomain)}</strong></p>` : ""}
-        ${credentials.map(credential => `
-          <div class="reminder">
-            <h3>${escapeHtml(credential.domain || "Unnamed domain")}</h3>
-            <div class="meta">${escapeHtml(credential.username || "No username")} - ${credential.enabled ? "enabled" : "paused"} - ${credential.password_set ? "password saved" : "password missing"}</div>
-            ${credential.login_url ? `<p class="meta"><a href="${escapeAttr(credential.login_url)}" target="_blank" rel="noreferrer">${escapeHtml(credential.login_url)}</a></p>` : ""}
-            ${credential.notes ? `<pre>${escapeHtml(credential.notes)}</pre>` : ""}
-            <div class="actions">
-              <button class="btn primary" onclick="editSiteCredential(${credential.id})">Edit</button>
-              <button class="btn" onclick="deleteSiteCredential(${credential.id})">Delete</button>
-            </div>
-          </div>
-        `).join("") || `<p class="muted">No site credentials saved yet.</p>`}
-      `;
-      if (!document.getElementById("credential_id").value) clearSiteCredentialForm();
-    }
-
-    async function saveSiteCredential() {
-      const payload = {
-        id: document.getElementById("credential_id").value || null,
-        domain: document.getElementById("credential_domain").value,
-        login_url: document.getElementById("credential_login_url").value,
-        username: document.getElementById("credential_username").value,
-        password: document.getElementById("credential_password").value,
-        notes: document.getElementById("credential_notes").value,
-        enabled: document.getElementById("credential_enabled").checked,
-        job_url: selectedApplication?.url || ""
-      };
-      const result = await api("/api/site-credentials/save", {method: "POST", body: JSON.stringify(payload)});
-      document.getElementById("credential_password").value = "";
-      message(`Saved site credential #${result.id}.`);
-      await load();
-      editSiteCredential(result.id);
-    }
-
-    async function deleteSiteCredential(id) {
-      if (!confirm("Delete this saved site credential and its Keychain password?")) return;
-      await api("/api/site-credentials/delete", {method: "POST", body: JSON.stringify({id})});
-      message("Site credential deleted.");
-      clearSiteCredentialForm();
-      await load();
-    }
-
-    function prepList(items, emptyText) {
-      if (!items || !items.length) return `<p class="muted">${escapeHtml(emptyText)}</p>`;
-      return `<ul>${items.slice(0, 8).map(item => `<li>${escapeHtml(item.prompt || item.label || item.name || item.reason || "Unnamed field")}${item.value_preview ? ` - ${escapeHtml(item.value_preview)}` : ""}</li>`).join("")}</ul>`;
-    }
-
-    function formPrepOverrideTargets(app) {
-      const report = app.form_prep_report || {};
-      const overrides = app.form_prep_overrides_map || {};
-      const items = [];
-      const seen = new Set();
-      function push(item, source) {
-        const prompt = String(item?.prompt || "").trim();
-        if (!prompt || seen.has(prompt)) return;
-        const category = String(item?.category || "");
-        if (source === "scanned" && !["custom_question", "work_authorization", "salary", "availability", "motivation", "cover_letter"].includes(category)) return;
-        seen.add(prompt);
-        items.push({
-          prompt,
-          category,
-          source,
-          reason: String(item?.reason || ""),
-          value_preview: String(item?.value_preview || ""),
-          current: String(overrides[prompt] || "")
-        });
-      }
-      (report.review_fields || []).forEach(item => push(item, "review"));
-      (report.skipped_fields || []).forEach(item => push(item, "skipped"));
-      (report.scanned_fields || []).forEach(item => push(item, "scanned"));
-      return items;
-    }
-
-    function formPrepOverridesEditor(app) {
-      const items = formPrepOverrideTargets(app);
-      if (!items.length) return `<p class="muted">No field-level overrides available yet. Run Prepare form first.</p>`;
-      return items.slice(0, 12).map(item => `
-        <div class="panel" style="margin:10px 0">
-          <label>${escapeHtml(item.prompt)}</label>
-          <p class="muted">
-            ${escapeHtml([item.category || "field", item.source].filter(Boolean).join(" - "))}
-            ${item.reason ? `<br>${escapeHtml(item.reason)}` : ""}
-            ${item.value_preview && !item.current ? `<br>Last value: ${escapeHtml(item.value_preview)}` : ""}
-          </p>
-          <textarea class="form-prep-override" data-prompt="${escapeAttr(item.prompt)}" data-category="${escapeAttr(item.category || "")}" placeholder="Leave blank to keep the automatic answer.">${escapeHtml(item.current)}</textarea>
-        </div>
-      `).join("");
-    }
-
-    function collectFormPrepOverrides() {
-      const result = {};
-      document.querySelectorAll(".form-prep-override").forEach(el => {
-        const prompt = String(el.dataset.prompt || "").trim();
-        const value = String(el.value || "").trim();
-        if (prompt && value) result[prompt] = value;
-      });
-      return JSON.stringify(result);
-    }
-
-    function formPrepSummary(app) {
-      const report = app.form_prep_report || {};
-      if (!report || !Object.keys(report).length) {
-        if (!app.form_prep_started_at) return `<p class="muted">No form preparation run yet.</p>`;
-        return `<p class="muted">Form preparation started ${escapeHtml(app.form_prep_started_at || "")}, but no report has been saved yet.</p>`;
-      }
-      const reviewCount = (report.review_fields || []).length;
-      const skippedCount = (report.skipped_fields || []).length;
-      const filledCount = (report.filled_fields || []).length;
-      const login = report.login || {};
-      const blocker = report.blocker || {};
-      return `
-        <div class="notice ${report.errors?.length ? "bad" : ""}">
-          Platform: ${escapeHtml(report.platform || "unknown")}<br>
-          Status: ${escapeHtml(report.status || "unknown")}<br>
-          Stage: ${escapeHtml(report.current_stage || "unknown")}<br>
-          Filled: ${filledCount} field(s)<br>
-          Review: ${reviewCount} field(s)<br>
-          Skipped: ${skippedCount} field(s)<br>
-          Login: ${escapeHtml(login.status || "not attempted")}
-          ${report.heartbeat_at ? `<br>Last heartbeat: ${escapeHtml(report.heartbeat_at)}` : ""}
-          ${report.last_event_at ? `<br>Last event: ${escapeHtml(report.last_event_at)}` : ""}
-          ${blocker.kind ? `<br>Waiting on you: ${escapeHtml(blocker.kind)}${blocker.message ? ` - ${escapeHtml(blocker.message)}` : ""}` : ""}
-          ${blocker.blocked_until ? `<br>Cooldown until: ${escapeHtml(blocker.blocked_until)}` : ""}
-          ${report.last_url ? `<br>Current page: ${escapeHtml(report.last_url)}` : ""}
-          ${app.form_prep_screenshot_path ? `<br>Screenshot: ${escapeHtml(app.form_prep_screenshot_path)}` : ""}
-        </div>
-        ${(report.events || []).length ? `<details><summary>Recent events</summary><pre>${escapeHtml((report.events || []).slice(-8).map(event => `[${event.at || ""}] ${event.stage || "event"} - ${event.message || ""}${event.url ? ` (${event.url})` : ""}`).join("\\n"))}</pre></details>` : ""}
-        <details>
-          <summary>Review-required fields</summary>
-          ${prepList(report.review_fields, "No review-only fields saved.")}
-        </details>
-        <details>
-          <summary>Skipped fields</summary>
-          ${prepList(report.skipped_fields, "No skipped fields saved.")}
-        </details>
-        <details>
-          <summary>Filled fields</summary>
-          ${prepList(report.filled_fields, "No filled fields saved.")}
-        </details>
-        <details>
-          <summary>Field overrides for next run</summary>
-          ${formPrepOverridesEditor(app)}
-        </details>
-        ${report.errors?.length ? `<details><summary>Errors</summary><pre>${escapeHtml((report.errors || []).join("\\n"))}</pre></details>` : ""}
-      `;
-    }
-
-    function renderLeads() {
-      const leads = state.leads || [];
-      document.getElementById("leadList").innerHTML = leads.map(lead => `
-        <div class="panel">
-          <h3>${escapeHtml(lead.company || "Unnamed company")}</h3>
-          <div class="meta">${escapeHtml(lead.industry || "No industry")} - ${escapeHtml(lead.status)}</div>
-          <div class="meta">${escapeHtml(lead.contact_email ? contactLeadSummary(lead) : "No contact email saved")}</div>
-          <div>
-            ${lead.readiness?.ready_to_send ? `<span class="tag">ready to send</span>` : ""}
-            ${lead.readiness?.needs_contact ? `<span class="tag">contact needed</span>` : ""}
-            ${lead.readiness?.needs_notes ? `<span class="tag">notes needed</span>` : ""}
-            ${lead.readiness?.needs_draft ? `<span class="tag">draft needed</span>` : ""}
-          </div>
-          ${lead.website ? `<p class="meta"><a href="${escapeAttr(lead.website)}" target="_blank" rel="noreferrer">${escapeHtml(lead.website)}</a></p>` : ""}
-          <div class="actions">
-            <button class="btn primary" onclick="selectLead(${lead.id})">Edit</button>
-            <button class="btn" onclick="setLeadStatus(${lead.id}, 'do-not-contact')">Do not contact</button>
-          </div>
-        </div>
-      `).join("") || `<p class="muted">No company leads yet.</p>`;
-      if (selectedLead) selectLead(selectedLead.id, false);
-    }
-
-    function renderTargets() {
-      const targets = state.targets || [];
-      const target = document.getElementById("targetList");
-      if (!target) return;
-      target.innerHTML = targets.map(item => `
-        <div class="reminder">
-          <h3>${escapeHtml(item.company || "Unnamed company")}</h3>
-          <div class="meta">${escapeHtml(item.industry || "No industry")} - priority ${escapeHtml(item.priority || 3)} - ${escapeHtml(item.status || "target")}</div>
-          ${item.website ? `<p class="meta"><a href="${escapeAttr(item.website)}" target="_blank" rel="noreferrer">${escapeHtml(item.website)}</a></p>` : ""}
-          ${item.careers_url ? `<p class="meta"><a href="${escapeAttr(item.careers_url)}" target="_blank" rel="noreferrer">${escapeHtml(item.careers_url)}</a></p>` : ""}
-          <div>
-            ${item.source_id ? `<span class="tag">source #${escapeHtml(item.source_id)}</span>` : ""}
-            ${item.lead_id ? `<span class="tag">lead #${escapeHtml(item.lead_id)}</span>` : ""}
-            ${item.source_type ? `<span class="tag">${escapeHtml(item.source_type)}</span>` : ""}
-          </div>
-          ${item.notes ? `<pre>${escapeHtml(item.notes)}</pre>` : ""}
-          <div class="actions">
-            <button class="btn primary" onclick="editTarget(${item.id})">Edit</button>
-            <button class="btn" onclick="targetToSource(${item.id})">Make job source</button>
-            <button class="btn" onclick="targetToLead(${item.id})">Make outreach lead</button>
-          </div>
-        </div>
-      `).join("") || `<p class="muted">No target companies yet. Add dream-fit brands here first.</p>`;
-    }
-
-    function renderSessionMemory() {
-      const el = document.getElementById("session_memory");
-      if (el && !el.matches(":focus")) el.value = state.session_memory || "";
-    }
-
-    function editTarget(id) {
-      selectedTarget = (state.targets || []).find(item => item.id === id);
-      if (!selectedTarget) return;
-      const fields = ["company", "website", "careers_url", "industry", "priority", "status", "source_type", "source_token", "source_query", "notes"];
-      document.getElementById("target_id").value = selectedTarget.id || "";
-      for (const field of fields) {
-        const el = document.getElementById(`target_${field}`);
-        if (el) el.value = selectedTarget[field] || (field === "source_query" ? "graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator" : "");
-      }
-      showTab("targets");
-    }
-
-    function clearTargetForm() {
-      selectedTarget = null;
-      document.getElementById("target_id").value = "";
-      ["company", "website", "careers_url", "industry", "source_token", "notes"].forEach(field => {
-        document.getElementById(`target_${field}`).value = "";
-      });
-      document.getElementById("target_priority").value = "3";
-      document.getElementById("target_status").value = "target";
-      document.getElementById("target_source_type").value = "";
-      document.getElementById("target_source_query").value = "graduate junior marketing coordinator marketing assistant brand assistant social media assistant content creator community coordinator campaign coordinator";
-    }
-
-    function selectCvVersion(id) {
-      selectedCvVersion = (state.cv_versions || []).find(item => Number(item.id) === Number(id)) || null;
-      renderResumeLab();
-    }
-
-    function clearCvVersionForm() {
-      selectedCvVersion = null;
-      renderResumeLab();
-    }
-
-    function selectLead(id, switchTab = true) {
-      selectedLead = (state.leads || []).find(lead => lead.id === id);
-      if (!selectedLead) return;
-      const lead = selectedLead;
-      const subject = outreachSubjectPreview(lead);
-      const readiness = lead.readiness || {};
-      const artifacts = lead.document_artifacts || {};
-      const searchLinks = lead.contact_search_links || {};
-      document.getElementById("leadEditor").innerHTML = `
-        <h3>${escapeHtml(lead.company || "Company lead")}</h3>
-        <div class="notice ${readiness.ready_to_send ? "" : "bad"}">
-          ${readiness.ready_to_send ? "This lead is ready for a manual send review." : "This lead still needs a few things before it is send-ready."}
-          ${readiness.issues?.length ? `<br>${escapeHtml(readiness.issues.join(" | "))}` : ""}
-        </div>
-        <div class="row">
-          <div><label>Company</label><input id="edit_lead_company" value="${escapeAttr(lead.company || "")}"></div>
-          <div><label>Website</label><input id="edit_lead_website" value="${escapeAttr(lead.website || "")}"></div>
-          <div><label>Industry</label><input id="edit_lead_industry" value="${escapeAttr(lead.industry || "")}"></div>
-          <div><label>Status</label>
-            <select id="edit_lead_status">
-              ${["found", "researched", "drafted", "approved", "sent", "replied", "do-not-contact"].map(s => `<option value="${s}" ${lead.status === s ? "selected" : ""}>${s}</option>`).join("")}
-            </select>
-          </div>
-          <div><label>Contact name</label><input id="edit_lead_contact_name" value="${escapeAttr(lead.contact_name || "")}"></div>
-          <div><label>Contact role</label><input id="edit_lead_contact_role" value="${escapeAttr(lead.contact_role || "")}"></div>
-        </div>
-        <label>Outreach style</label>
-        <select id="edit_lead_outreach_style">
-          <option value="intro" ${String(lead.outreach_style || "intro") === "intro" ? "selected" : ""}>Short intro email</option>
-          <option value="proposal" ${String(lead.outreach_style || "") === "proposal" ? "selected" : ""}>Proposal-style email</option>
-        </select>
-        <label>Contact email</label><input id="edit_lead_contact_email" value="${escapeAttr(lead.contact_email || "")}">
-        <label>Source URL</label><input id="edit_lead_source_url" value="${escapeAttr(lead.source_url || "")}">
-        <label>Why this brand fits / why you fit</label><textarea id="edit_lead_company_notes">${escapeHtml(lead.company_notes || "")}</textarea>
-        <label>Contact-finding notes</label><textarea id="edit_lead_contact_search_notes">${escapeHtml(lead.contact_search_notes || "")}</textarea>
-        <details>
-          <summary>Contact search links</summary>
-          ${Object.entries(searchLinks).map(([label, url]) => `<div class="meta"><a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a></div>`).join("") || `<p class="muted">No contact-search links yet.</p>`}
-        </details>
-        <label>Subject line preview</label><input id="edit_lead_subject" value="${escapeAttr(subject)}" readonly>
-        <label>Draft email</label><textarea id="edit_lead_outreach_email" style="min-height:280px">${escapeHtml(lead.outreach_email || "")}</textarea>
-        <details>
-          <summary>Outreach pack</summary>
-          <p class="muted">${escapeHtml(lead.documents_folder || "")}</p>
-          <pre>${escapeHtml(Object.entries(artifacts).map(([key, value]) => `${key}: ${value}`).join("\n") || "No outreach files generated yet.")}</pre>
-        </details>
-        <div class="actions">
-          <button class="btn primary" onclick="saveLeadEdit()">Save company</button>
-          <button class="btn" onclick="generateLeadEmail()">Build outreach email</button>
-          <button class="btn" onclick="humanizeLeadEmail()">Polish tone</button>
-          <button class="btn warn" onclick="sendLeadEmail()">Send this email</button>
-          <button class="btn" onclick="setLeadStatus(${lead.id}, 'do-not-contact')">Do not contact</button>
-        </div>
-      `;
-      if (switchTab) showTab("outreach");
-    }
-
-    function outreachSubjectPreview(lead) {
-      const company = String(lead?.company || "").trim() || "your company";
-      return `Quick introduction - marketing support for ${company}`;
-    }
-
-    function contactLeadSummary(lead) {
-      return [lead.contact_name, lead.contact_role, lead.contact_email].filter(Boolean).join(" - ");
-    }
-
-    function selectApplication(id, switchTab = true) {
-      selectedApplication = state.applications.find(app => app.id === id);
-      if (!selectedApplication) return;
-      renderSiteCredentials();
-      const app = selectedApplication;
-      const suggestedCredential = (state.site_credentials || []).find(item => {
-        const domain = item.domain || "";
-        return app.url && domain && app.url.includes(domain);
-      });
-      document.getElementById("applicationEditor").innerHTML = `
-        <h3>${escapeHtml(app.title)} at ${escapeHtml(app.company)}</h3>
-        <label>Status</label>
-        <select id="edit_status">
-          ${["draft", "ready", "submitted", "interview", "rejected", "offer"].map(s => `<option value="${s}" ${app.status === s ? "selected" : ""}>${s}</option>`).join("")}
-        </select>
-        <label>Queue state</label>
-        <select id="edit_queue_state">
-          ${["review", "approved", "hold"].map(s => `<option value="${s}" ${normalizeQueueState(app.queue_state) === s ? "selected" : ""}>${s}</option>`).join("")}
-        </select>
-        <div class="notice">
-          Prepare form opens a visible browser, tries saved login/session data, fills what it can, writes a field-by-field report, and still stops before final submit.
-          ${suggestedCredential ? `<br>Saved login available for ${escapeHtml(suggestedCredential.domain)}.` : ""}
-        </div>
-        <div class="row">
-          <div><label>Contact name</label><input id="edit_contact_name" value="${escapeAttr(app.contact_name || "")}" placeholder="Jane"></div>
-          <div><label>Contact role</label><input id="edit_contact_role" value="${escapeAttr(app.contact_role || "")}" placeholder="Marketing Manager"></div>
-        </div>
-        <label>Company/contact email</label><input id="edit_contact_email" value="${escapeAttr(app.contact_email || "")}" placeholder="recruiter@company.com">
-        <label>Personalization notes</label><textarea id="edit_company_notes" placeholder="What stood out about the company, campaign, product, team, or brand.">${escapeHtml(app.company_notes || "")}</textarea>
-        <label>Company research URL</label><input id="edit_research_url" value="${escapeAttr(app.research_url || "")}" placeholder="Company website, about page, or careers page">
-        <label>Next follow-up</label><input id="edit_next_follow_up" type="date" value="${escapeAttr(app.next_follow_up || "")}">
-        <p class="muted">${escapeHtml(followUpLabel(app))}</p>
-        <label>Company research notes</label><textarea id="edit_research_notes" style="min-height:180px">${escapeHtml(app.research_notes || "")}</textarea>
-        <label>Research sources</label><textarea id="edit_research_sources">${escapeHtml(app.research_sources || "")}</textarea>
-        <label>Application checklist</label><textarea id="edit_checklist" readonly>${escapeHtml(app.checklist || "")}</textarea>
-        <label>Quality notes</label><textarea id="edit_quality_notes" readonly>${escapeHtml(app.quality_notes || "")}</textarea>
-        <label>Truthfulness / work authorization flags</label><textarea id="edit_truthfulness_flags" readonly>${escapeHtml(app.truthfulness_flags || "")}</textarea>
-        <p class="muted">Quality score: ${escapeHtml(app.quality_score || 0)}. Recommended CV: ${escapeHtml(app.recommended_cv_version || "not assessed yet")}.</p>
-        <h3 style="margin-top:18px">Latest Form Prep Report</h3>
-        ${formPrepSummary(app)}
-        <details><summary>Tailored CV brief preview</summary><pre>${escapeHtml(tailoredCvPreview(app))}</pre></details>
-        <details><summary>CV tailoring diff</summary>${cvTailoringDiffHtml(app)}</details>
-        <label>Cover letter</label><textarea id="edit_cover_letter" style="min-height:220px">${escapeHtml(app.cover_letter || "")}</textarea>
-        <label>CV notes</label><textarea id="edit_cv_notes">${escapeHtml(app.cv_notes || "")}</textarea>
-        <label>Questionnaire answers</label><textarea id="edit_answers" style="min-height:220px">${escapeHtml(app.answers || "")}</textarea>
-        <label>Follow-up email</label><textarea id="edit_follow_up">${escapeHtml(app.follow_up || "")}</textarea>
-        <div class="actions">
-          <button class="btn primary" onclick="saveApplication()">Save draft</button>
-          <button class="btn" onclick="humanizeApplication()">Polish my writing</button>
-          <button class="btn" onclick="researchApplication()">Research this company</button>
-          <button class="btn" onclick="useSavedResearchUrlNow()">Use saved URL now</button>
-          <button class="btn" onclick="regenerateFollowUp()">Rewrite follow-up email</button>
-          <button class="btn" onclick="prepareApplicationForm()">Fill in application form</button>
-          <button class="btn" onclick="resumeApplicationForm()">Continue filling form</button>
-          <button class="btn warn" onclick="markApplicationSubmitted()">I applied for this</button>
-          <button class="btn warn" onclick="rejectSelectedApplication()">Skip this role</button>
-          <a class="btn" href="${mailto(app)}">Open email draft</a>
-          <button class="btn" onclick="sendFollowUp()">Send follow-up</button>
-        </div>
-        <h3 style="margin-top:18px">Form Fill Feedback</h3>
-        <label>What filled correctly?</label><textarea id="form_feedback_worked" placeholder="Example: name, email, phone, CV upload"></textarea>
-        <label>What was missed?</label><textarea id="form_feedback_missed" placeholder="Example: LinkedIn, salary, cover letter"></textarea>
-        <label>What was wrong?</label><textarea id="form_feedback_wrong" placeholder="Example: location was put into country, salary was too long"></textarea>
-        <label>Notes</label><textarea id="form_feedback_notes" placeholder="Anything useful about this ATS/site."></textarea>
-        <div class="actions">
-          <button class="btn" onclick="saveFormFillFeedback()">Save form feedback</button>
-        </div>
-        <p class="muted">Generated files are written into the local documents folder after saving.</p>
-      `;
-      if (!document.getElementById("credential_id").value) clearSiteCredentialForm();
-      if (switchTab) {
-        showTab("applications");
-        setTimeout(() => {
-          const editor = document.getElementById("applicationEditor");
-          if (editor) editor.scrollIntoView({behavior: "smooth", block: "start"});
-        }, 50);
-      }
-    }
-
-    function contactSummary(app) {
-      const bits = [];
-      if (app.contact_name) bits.push(app.contact_name);
-      if (app.contact_role) bits.push(app.contact_role);
-      if (app.contact_email) bits.push(app.contact_email);
-      return bits.length ? `Contact: ${bits.join(" - ")}` : "No contact person saved";
-    }
-
-    function tailoredCvPreview(app) {
-      const job = appJob(app);
-      const version = app.recommended_cv_version || "General marketing CV";
-      const keywords = cvKeywords(job);
-      return [
-        `Role: ${app.title || ""}`,
-        `Company: ${app.company || ""}`,
-        `Recommended CV: ${version}`,
-        "",
-        "Use this CV angle:",
-        cvSummaryForVersion(version, app.company || "the company"),
-        "",
-        "Keywords to mirror truthfully:",
-        keywords.length ? keywords.join(", ") : "marketing, brand, content, research, analytics",
-        "",
-        "Prioritise evidence from:",
-        "- UCT Business Science Marketing",
-        "- Cookie Factory content work",
-        "- Look@ / SIGMUND market research",
-        "- Sports coaching and Ironman training",
-        "- Triathlon/gym training app where relevant"
-      ].join("\\n");
-    }
-
-    function cvSummaryForVersion(version, company) {
-      if (version.includes("Sports")) return `Cape Town-based UCT marketing graduate with content, research, analytics, coaching, and endurance-sport experience, positioned for practical sport/fitness brand work at ${company}.`;
-      if (version.includes("Content")) return `Marketing graduate with hands-on social content, Canva, captions, short-form video, scheduling, and reporting experience, positioned for content and brand work at ${company}.`;
-      if (version.includes("Research")) return `Marketing graduate with thesis, market research, Google Analytics, and insight-led recommendation experience, positioned for research/analytics marketing work at ${company}.`;
-      if (version.includes("Startup")) return `Marketing graduate with AR startup project exposure and AI-assisted product-building experience, positioned for growth/startup marketing work at ${company}.`;
-      return `UCT Business Science Marketing graduate with content, research, analytics, and sport leadership experience, positioned for practical marketing work at ${company}.`;
-    }
-
-    function cvKeywords(job) {
-      const text = `${job.title || ""} ${job.description || ""}`.toLowerCase();
-      const terms = ["marketing", "brand", "campaign", "content", "social media", "community", "growth", "analytics", "paid media", "events", "partnership", "sport", "fitness", "outdoor", "wellness", "consumer"];
-      return terms.filter(term => text.includes(term)).slice(0, 12);
-    }
-
-    function cvEvidenceBullets(job) {
-      const text = `${job.title || ""} ${job.description || ""}`.toLowerCase();
-      const bullets = [
-        "UCT Business Science Marketing graduate with 75%+ average and honours-equivalent final year.",
-        "Google Analytics certified, with market research, consumer behaviour, and strategic marketing training.",
-      ];
-      if (["content", "social", "instagram", "tiktok", "creative"].some(term => text.includes(term))) {
-        bullets.push("Cookie Factory content work: Canva graphics, captions, scheduling, short-form content, and engagement reporting.");
-      }
-      if (["research", "analytics", "insight", "data", "survey"].some(term => text.includes(term))) {
-        bullets.push("Research evidence: UCT thesis on VR/AR adoption plus Look@ / SIGMUND market research work.");
-      }
-      if (["sport", "fitness", "outdoor", "wellness", "athlete", "training"].some(term => text.includes(term))) {
-        bullets.push("Sport/fitness link: coaching, Ironman 70.3 training, and a self-built triathlon/gym training app.");
-      }
-      if (["startup", "growth", "product", "ai", "automation", "app"].some(term => text.includes(term))) {
-        bullets.push("Startup/product angle: AI-assisted training app work with practical iteration and user-focus.");
-      }
-      if (["event", "community", "activation", "partnership"].some(term => text.includes(term))) {
-        bullets.push("Community/event evidence: coaching and school tournament coordination with visible audience-facing responsibility.");
-      }
-      return Array.from(new Set(bullets)).slice(0, 7);
-    }
-
-    function cvTailoringDiffHtml(app) {
-      const job = appJob(app);
-      const version = app.recommended_cv_version || "General marketing CV";
-      const keywords = cvKeywords(job);
-      const coverage = draftKeywordCoverage(app, job);
-      const bullets = cvEvidenceBullets(job);
-      return `
-        <div class="reminder">
-          <div class="meta">Recommended CV: ${escapeHtml(version)}</div>
-          <p>${escapeHtml(cvSummaryForVersion(version, app.company || "the company"))}</p>
-          <div class="row">
-            <div>
-              <strong>Matched keywords</strong>
-              <p class="muted">${escapeHtml(coverage.matched.length ? coverage.matched.join(", ") : "No strong keyword overlap detected in the current draft yet.")}</p>
-            </div>
-            <div>
-              <strong>Still missing</strong>
-              <p class="muted">${escapeHtml(coverage.missing.length ? coverage.missing.join(", ") : "None from the main job keywords.")}</p>
-            </div>
-          </div>
-          <strong>Evidence to emphasise</strong>
-          <ul>
-            ${bullets.map(bullet => `<li>${escapeHtml(bullet)}</li>`).join("")}
-          </ul>
-          <strong>Top role keywords</strong>
-          <p class="muted">${escapeHtml(keywords.length ? keywords.join(", ") : "No clear marketing keywords detected in the job text.")}</p>
-        </div>
-      `;
-    }
-
-    async function saveProfile() {
-      const payload = {};
-      for (const key of profileKeys) payload[key] = document.getElementById(`profile_${key}`).value;
-      await api("/api/profile", {method: "POST", body: JSON.stringify(payload)});
-      message("Profile saved.");
-      await load();
-    }
-
-    async function extractCv() {
-      const result = await api("/api/profile/extract-cv", {method: "POST", body: "{}"});
-      if (result.ok) {
-        message("CV text extracted.");
-      } else {
-        message("No PDF extractor is available yet. Paste CV text into the profile field for now.", "bad");
-      }
-      await load();
-    }
-
-    async function extractWritingSample() {
-      const payload = {
-        path: document.getElementById("profile_writing_sample_path").value,
-        text: document.getElementById("profile_writing_sample_text").value
-      };
-      const result = await api("/api/profile/extract-writing-sample", {method: "POST", body: JSON.stringify(payload)});
-      if (result.ok) {
-        document.getElementById("profile_writing_sample_text").value = result.text || "";
-        document.getElementById("profile_writing_style_notes").value = result.style_notes || "";
-        message("Writing sample extracted and analysed.");
-      } else {
-        message("Could not extract that writing sample. Paste the text into the writing sample field instead.", "bad");
-      }
-      await load();
-    }
-
-    async function discover() {
-      const source = document.getElementById("discover_source").value;
-      const token = document.getElementById("discover_token").value;
-      const query = document.getElementById("discover_query").value;
-      const result = await api("/api/discover", {method: "POST", body: JSON.stringify({source, token, query})});
-      message(`Imported ${result.count} jobs.`);
-      await load();
-      showTab("jobs");
-    }
-
-    async function saveSource() {
-      const payload = {
-        name: document.getElementById("source_name").value,
-        source_type: document.getElementById("source_type").value,
-        token: document.getElementById("source_token").value,
-        query: document.getElementById("source_query").value,
-        enabled: document.getElementById("source_enabled").checked
-      };
-      await api("/api/sources/save", {method: "POST", body: JSON.stringify(payload)});
-      document.getElementById("source_name").value = "";
-      document.getElementById("source_token").value = "";
-      document.getElementById("source_query").value = graduateDiscoveryQuery;
-      message("Automatic source saved.");
-      await load();
-    }
-
-    async function runSource(id) {
-      const result = await api("/api/sources/run", {method: "POST", body: JSON.stringify({id})});
-      message(`Source imported ${result.count || 0} jobs.`);
-      await load();
-      showTab("jobs");
-    }
-
-    async function runAllSources() {
-      const result = await api("/api/sources/run-all", {method: "POST", body: "{}"});
-      const errors = (result.errors || []).length ? ` Errors: ${(result.errors || []).join("; ")}` : "";
-      message(`Ran ${result.ran || 0} sources and imported ${result.imported || 0} jobs.${errors}`, errors ? "bad" : "ok");
-      await load();
-      showTab("jobs");
-    }
-
-    async function runDailyWorkflow() {
-      message("Running daily workflow. This can take a minute while sources are checked.");
-      const result = await api("/api/daily/run", {method: "POST", body: JSON.stringify({limit: 5})});
-      const errors = result.discovery?.errors?.length ? ` Errors: ${result.discovery.errors.join("; ")}` : "";
-      message(
-        `Daily workflow complete: ${result.discovery?.imported || 0} jobs imported, ${result.rescored?.count || 0} rescored, ${result.shortlisted?.count || 0} shortlisted, ${result.drafts?.count || 0} drafts generated.${errors}`,
-        errors ? "bad" : "ok"
-      );
-      await load();
-      showTab("applications");
-    }
-
-    async function runAutomaticMode() {
-      const limit = Number(document.getElementById("auto_limit")?.value || 5);
-      const status = document.getElementById("autoStatus");
-      if (status) status.innerHTML = `<div class="notice">Automatic mode is running. This can take a few minutes while sources, drafts, research, quality checks, and reports are prepared.</div>`;
-      const result = await api("/api/automation/run", {method: "POST", body: JSON.stringify({limit})});
-      const errors = [
-        ...(result.discovery?.errors || []),
-        ...(result.target_sources?.errors || [])
-      ];
-      const html = `
-        <div class="notice ${errors.length ? "bad" : ""}">
-          Automatic mode complete. Imported ${result.discovery?.imported || 0} jobs, generated ${result.drafts?.count || 0} drafts, researched ${result.researched?.count || 0}, humanized ${result.humanized?.count || 0}, assessed ${result.assessed?.count || 0}.
-          ${result.weekly_report ? `<br>Weekly report: ${escapeHtml(result.weekly_report)}` : ""}
-          ${result.reminders?.ics_path ? `<br>Reminder calendar: ${escapeHtml(result.reminders.ics_path)} (${result.reminders.count || 0} reminders)` : ""}
-          ${result.notifications ? `<br>Local notifications sent: ${result.notifications.sent || 0} (${result.notifications.due || 0} due)` : ""}
-          ${result.inbox_scan ? `<br>Inbox replies: ${result.inbox_scan.imported || 0} new, ${result.inbox_scan.matched || 0} matched` : ""}
-          ${result.checklist ? `<br>Checklist: ${escapeHtml(result.checklist)}` : ""}
-          ${errors.length ? `<pre>${escapeHtml(errors.join("\\n"))}</pre>` : ""}
-        </div>
-      `;
-      if (status) status.innerHTML = html;
-      message("Automatic mode completed. Review Daily Review before submitting anything.");
-      await load();
-      showTab("dashboard");
-    }
-
-    async function exportReminders() {
-      const result = await api("/api/reminders/export", {method: "POST", body: "{}"});
-      message(`Exported ${result.count || 0} reminder(s) to ${result.ics_path}.`);
-      const status = document.getElementById("autoStatus");
-      if (status) {
-        status.innerHTML = `<div class="notice">Reminder calendar exported: ${escapeHtml(result.ics_path)}<br>Summary: ${escapeHtml(result.summary_path || "")}</div>`;
-      }
-    }
-
-    async function notifyDueReminders() {
-      const result = await api("/api/reminders/notify-due", {method: "POST", body: "{}"});
-      message(`Checked due reminders. Sent ${result.sent || 0} notification(s).`);
-      const status = document.getElementById("autoStatus");
-      if (status) {
-        const errors = (result.errors || []).join("\\n");
-        status.innerHTML = `
-          <div class="${errors ? "notice bad" : "notice"}">
-            Due reminders: ${result.due || 0}<br>
-            Notifications sent: ${result.sent || 0}
-            ${errors ? `<pre>${escapeHtml(errors)}</pre>` : ""}
-          </div>
-        `;
-      }
-    }
-
-    async function seedStarterSources() {
-      const result = await api("/api/sources/seed-starter", {method: "POST", body: "{}"});
-      message(`Seeded ${result.count || 0} starter sources.`);
-      await load();
-    }
-
-    async function toggleSource(id, enabled) {
-      await api("/api/sources/toggle", {method: "POST", body: JSON.stringify({id, enabled})});
-      await load();
-    }
-
-    async function pauseFailingSources() {
-      const result = await api("/api/sources/pause-failing", {method: "POST", body: "{}"});
-      message(`Paused ${result.count || 0} failing source(s).`);
-      await load();
-    }
-
-    async function importUrl() {
-      const url = document.getElementById("url_import").value;
-      await api("/api/jobs/url", {method: "POST", body: JSON.stringify({url})});
-      message("Job imported from URL.");
-      await load();
-      showTab("jobs");
-    }
-
-    async function importAlert() {
-      const text = document.getElementById("alert_text").value;
-      const source = document.getElementById("alert_source").value || "email-alert";
-      const result = await api("/api/alerts/import", {method: "POST", body: JSON.stringify({text, source})});
-      document.getElementById("alert_text").value = "";
-      const skipped = result.skipped ? ` Skipped ${result.skipped} extra link(s) after the first 40.` : "";
-      message(`Imported ${result.count || 0} job alert link(s).${skipped}`);
-      await load();
-      showTab("jobs");
-    }
-
-    async function addManualJob() {
-      const payload = {
-        title: document.getElementById("manual_title").value,
-        company: document.getElementById("manual_company").value,
-        location: document.getElementById("manual_location").value,
-        url: document.getElementById("manual_url").value,
-        description: document.getElementById("manual_description").value,
-        source: "manual"
-      };
-      await api("/api/jobs/manual", {method: "POST", body: JSON.stringify(payload)});
-      message("Manual job saved.");
-      await load();
-      showTab("jobs");
-    }
-
-    function targetPayload() {
-      return {
-        id: document.getElementById("target_id").value || null,
-        company: document.getElementById("target_company").value,
-        website: document.getElementById("target_website").value,
-        careers_url: document.getElementById("target_careers_url").value,
-        industry: document.getElementById("target_industry").value,
-        priority: document.getElementById("target_priority").value,
-        status: document.getElementById("target_status").value,
-        source_type: document.getElementById("target_source_type").value,
-        source_token: document.getElementById("target_source_token").value,
-        source_query: document.getElementById("target_source_query").value,
-        notes: document.getElementById("target_notes").value
-      };
-    }
-
-    async function saveTarget() {
-      const result = await api("/api/targets/save", {method: "POST", body: JSON.stringify(targetPayload())});
-      message("Target company saved.");
-      await load();
-      editTarget(result.id);
-    }
-
-    async function importTargets() {
-      const text = document.getElementById("target_bulk").value;
-      const result = await api("/api/targets/import", {method: "POST", body: JSON.stringify({text})});
-      document.getElementById("target_bulk").value = "";
-      const skipped = (result.skipped || []).length ? ` Skipped ${result.skipped.length} line(s).` : "";
-      message(`Imported ${result.count || 0} target companies.${skipped}`, skipped ? "bad" : "ok");
-      await load();
-      showTab("targets");
-    }
-
-    async function seedStarterTargets() {
-      const result = await api("/api/targets/seed-starter", {method: "POST", body: "{}"});
-      message(`Seeded ${result.count || 0} target companies.`);
-      await load();
-      showTab("targets");
-    }
-
-    async function targetToSource(id) {
-      const result = await api("/api/targets/source", {method: "POST", body: JSON.stringify({id})});
-      message(`Automatic source created as #${result.source_id}.`);
-      await load();
-      showTab("discover");
-    }
-
-    async function targetToLead(id) {
-      const result = await api("/api/targets/lead", {method: "POST", body: JSON.stringify({id})});
-      message(`Outreach lead created as #${result.lead_id}.`);
-      await load();
-      showTab("outreach");
-      selectLead(result.lead_id);
-    }
-
-    async function refreshSessionMemory() {
-      const result = await api("/api/session-memory");
-      document.getElementById("session_memory").value = result.content || "";
-      message("Session memory refreshed.");
-    }
-
-    async function generateEndSessionDraft() {
-      const current = document.getElementById("session_memory").value;
-      const result = await api("/api/session-memory/end-draft", {method: "POST", body: JSON.stringify({content: current})});
-      document.getElementById("session_memory").value = result.content || "";
-      message("End-session draft added. Review it, then save the memory file.");
-    }
-
-    async function saveSessionMemory() {
-      const content = document.getElementById("session_memory").value;
-      const result = await api("/api/session-memory/save", {method: "POST", body: JSON.stringify({content})});
-      state.session_memory = result.content || content;
-      message("SESSION_MEMORY.md saved.");
-    }
-
-    function leadPayloadFrom(prefix, id = null) {
-      return {
-        id,
-        company: document.getElementById(`${prefix}_company`).value,
-        website: document.getElementById(`${prefix}_website`).value,
-        industry: document.getElementById(`${prefix}_industry`).value,
-        contact_name: document.getElementById(`${prefix}_contact_name`).value,
-        contact_role: document.getElementById(`${prefix}_contact_role`).value,
-        contact_email: document.getElementById(`${prefix}_contact_email`).value,
-        source_url: document.getElementById(`${prefix}_source_url`).value,
-        company_notes: document.getElementById(`${prefix}_company_notes`).value,
-        contact_search_notes: document.getElementById(`${prefix}_contact_search_notes`)?.value || "",
-        outreach_style: document.getElementById(`${prefix}_outreach_style`)?.value || "intro",
-        status: document.getElementById(`${prefix}_status`)?.value || "found",
-        outreach_email: document.getElementById(`${prefix}_outreach_email`)?.value || ""
-      };
-    }
-
-    async function saveLead() {
-      const payload = leadPayloadFrom("lead");
-      await api("/api/leads/save", {method: "POST", body: JSON.stringify(payload)});
-      ["company", "website", "industry", "source_url", "contact_name", "contact_role", "contact_email", "company_notes"].forEach(key => {
-        document.getElementById(`lead_${key}`).value = "";
-      });
-      document.getElementById("lead_contact_search_notes").value = "";
-      document.getElementById("lead_outreach_style").value = "intro";
-      message("Outreach lead saved.");
-      await load();
-      showTab("outreach");
-    }
-
-    async function saveLeadEdit() {
-      if (!selectedLead) return;
-      const payload = leadPayloadFrom("edit_lead", selectedLead.id);
-      await api("/api/leads/save", {method: "POST", body: JSON.stringify(payload)});
-      message("Outreach lead saved.");
-      await load();
-    }
-
-    async function generateLeadEmail() {
-      if (!selectedLead) return;
-      const payload = leadPayloadFrom("edit_lead", selectedLead.id);
-      const result = await api("/api/leads/generate", {method: "POST", body: JSON.stringify(payload)});
-      document.getElementById("edit_lead_outreach_email").value = result.outreach_email || "";
-      message("Outreach email drafted.");
-      await load();
-    }
-
-    async function humanizeLeadEmail() {
-      if (!selectedLead) return;
-      const result = await api("/api/leads/humanize", {
-        method: "POST",
-        body: JSON.stringify({
-          id: selectedLead.id,
-          outreach_email: document.getElementById("edit_lead_outreach_email").value
-        })
-      });
-      document.getElementById("edit_lead_outreach_email").value = result.outreach_email || "";
-      const check = result.check || {};
-      const flagged = (check.flags || []).length + (check.long_sentence_count || 0);
-      message(flagged ? `Tone polished, but ${flagged} thing(s) still need a quick review.` : "Tone polished in your voice.");
-      await load();
-    }
-
-    async function setLeadStatus(id, status) {
-      await api("/api/leads/status", {method: "POST", body: JSON.stringify({id, status})});
-      message(`Lead marked ${status}.`);
-      await load();
-    }
-
-    async function sendLeadEmail() {
-      if (!selectedLead) return;
-      await saveLeadEdit();
-      const to = prompt("Recipient email address for this outreach:", document.getElementById("edit_lead_contact_email").value || "");
-      if (!to) return;
-      await api("/api/leads/send", {method: "POST", body: JSON.stringify({id: selectedLead.id, to})});
-      message("Outreach email sent and follow-up scheduled.");
-      await load();
-    }
-
-    async function setJobStatus(id, status) {
-      await api("/api/jobs/status", {method: "POST", body: JSON.stringify({id, status})});
-      await load();
-    }
-
-    async function setTooSenior(id, too_senior) {
-      await api("/api/jobs/too-senior", {method: "POST", body: JSON.stringify({id, too_senior})});
-      message(too_senior ? "Job marked as too senior for this search." : "Job returned to the active pool.");
-      await load();
-      if (document.getElementById("job_filter")?.value === "shortlisted") {
-        await api("/api/jobs/shortlist-top", {method: "POST", body: JSON.stringify({limit: 5})});
-        await load();
-      }
-      renderJobs();
-    }
-
-    async function rescoreJobs() {
-      const result = await api("/api/jobs/rescore", {method: "POST", body: "{}"});
-      message(`Rescored ${result.count || 0} jobs.`);
-      await load();
-      renderJobs();
-    }
-
-    async function shortlistTopJobs() {
-      const result = await api("/api/jobs/shortlist-top", {method: "POST", body: JSON.stringify({limit: 5})});
-      message(`Shortlisted ${result.count || 0} top jobs.`);
-      await load();
-      document.getElementById("job_filter").value = "shortlisted";
-      renderJobs();
-    }
-
-    async function generateShortlistDrafts() {
-      const result = await api("/api/applications/generate-bulk", {method: "POST", body: JSON.stringify({status: "shortlisted", limit: 5})});
-      message(`Generated ${result.count || 0} application drafts from shortlisted jobs.`);
-      await load();
-      showTab("applications");
-    }
-
-    async function saveCvVersion() {
-      const payload = {
-        id: document.getElementById("cv_version_id")?.value || "",
-        name: document.getElementById("cv_version_name")?.value || "",
-        focus: document.getElementById("cv_version_focus")?.value || "",
-        file_path: document.getElementById("cv_version_file_path")?.value || "",
-        notes: document.getElementById("cv_version_notes")?.value || "",
-        is_default: document.getElementById("cv_version_is_default")?.checked || false
-      };
-      await api("/api/cv-versions/save", {method: "POST", body: JSON.stringify(payload)});
-      message("CV version saved.");
-      selectedCvVersion = null;
-      await load();
-      showTab("resume_lab");
-    }
-
-    async function setDefaultCvVersion(id) {
-      const cv = (state.cv_versions || []).find(item => Number(item.id) === Number(id));
-      if (!cv) return;
-      await api("/api/cv-versions/save", {method: "POST", body: JSON.stringify({
-        id: cv.id,
-        name: cv.name,
-        focus: cv.focus,
-        file_path: cv.file_path,
-        notes: cv.notes,
-        is_default: true
-      })});
-      message("Default CV version updated.");
-      selectedCvVersion = null;
-      await load();
-      showTab("resume_lab");
-    }
-
-    async function deleteCvVersion(id) {
-      const cv = (state.cv_versions || []).find(item => Number(item.id) === Number(id));
-      if (!cv) return;
-      const confirmed = confirm(`Delete CV version ${cv.name}?`);
-      if (!confirmed) return;
-      await api("/api/cv-versions/delete", {method: "POST", body: JSON.stringify({id})});
-      message("CV version deleted.");
-      selectedCvVersion = null;
-      await load();
-      showTab("resume_lab");
-    }
-
-    async function refreshApplicationQueue() {
-      const result = await api("/api/applications/refresh-queue", {method: "POST", body: JSON.stringify({limit: 5})});
-      const shortlisted = result.shortlisted?.count || 0;
-      const drafted = result.drafts?.count || 0;
-      message(`Refreshed applications: ${shortlisted} jobs shortlisted, ${drafted} new draft${drafted === 1 ? "" : "s"} generated. Newest options appear first.`);
-      await load();
-      showTab("applications");
-      window.scrollTo({top: 0, behavior: "smooth"});
-    }
-
-    async function setApplicationQueueState(id, queue_state) {
-      await api("/api/applications/queue-state", {method: "POST", body: JSON.stringify({id, queue_state})});
-      const labels = {review: "moved back to review", approved: "approved for prep", hold: "moved to hold"};
-      message(`Application ${labels[queue_state] || "updated"}.`);
-      await load();
-      if (selectedApplication && Number(selectedApplication.id) === Number(id)) {
-        selectApplication(id, false);
-      }
-    }
-
-    async function approveSafeQueueRoles() {
-      const ids = currentBatchApplications().filter(app => safeForAutoApproval(app)).map(app => app.id);
-      if (!ids.length) {
-        message("No current-batch roles meet the safe auto-approval rule right now.");
-        return;
-      }
-      for (const id of ids) {
-        await api("/api/applications/queue-state", {method: "POST", body: JSON.stringify({id, queue_state: "approved"})});
-      }
-      message(`Approved ${ids.length} safe role${ids.length === 1 ? "" : "s"} in the current batch.`);
-      await load();
-      showTab("auto_apply_queue");
-    }
-
-    async function cleanupStaleApplications() {
-      const confirmed = confirm("Reject active drafts that no longer fit the graduate-marketing target and remove them from the live queue?");
-      if (!confirmed) return;
-      const result = await api("/api/applications/cleanup-stale", {method: "POST", body: "{}"});
-      message(result.count ? `Cleaned ${result.count} stale draft${result.count === 1 ? "" : "s"} from the queue.` : "No stale drafts needed cleanup.");
-      await load();
-      showTab("auto_apply_queue");
-    }
-
-    async function holdBlockedQueueRoles() {
-      const ids = currentBatchApplications()
-        .filter(app => activeBlockedDomain(app.url) || activeThrottledDomain(app.url))
-        .map(app => app.id);
-      if (!ids.length) {
-        message("No blocked or throttled roles need to be moved to hold.");
-        return;
-      }
-      for (const id of ids) {
-        await api("/api/applications/queue-state", {method: "POST", body: JSON.stringify({id, queue_state: "hold"})});
-      }
-      message(`Moved ${ids.length} blocked/throttled role${ids.length === 1 ? "" : "s"} to hold.`);
-      await load();
-      showTab("auto_apply_queue");
-    }
-
-    async function returnQueueToReview() {
-      const ids = currentBatchApplications()
-        .filter(app => normalizeQueueState(app.queue_state) !== "review")
-        .map(app => app.id);
-      if (!ids.length) {
-        message("Current batch is already fully in review.");
-        return;
-      }
-      for (const id of ids) {
-        await api("/api/applications/queue-state", {method: "POST", body: JSON.stringify({id, queue_state: "review"})});
-      }
-      message(`Returned ${ids.length} role${ids.length === 1 ? "" : "s"} to review.`);
-      await load();
-      showTab("auto_apply_queue");
-    }
-
-    async function rejectApplication(id) {
-      const app = (state.applications || []).find(item => Number(item.id) === Number(id));
-      if (!app) return;
-      const reasonPrompt = `Why are you rejecting ${app.title || "this role"} at ${app.company || "this company"}?\n\nUse one of these or type your own:\n- ${rejectionReasonChoices.join("\n- ")}`;
-      const reason = prompt(reasonPrompt, "too senior");
-      if (!reason) return;
-      const notes = prompt("Optional note for future learning:", "") || "";
-      const confirmed = confirm(`Remove ${app.title || "this role"} at ${app.company || "this company"} and try to pull in a replacement?`);
-      if (!confirmed) return;
-      const result = await api("/api/applications/reject-and-replace", {method: "POST", body: JSON.stringify({id, reason, notes})});
-      const replacements = result.replacement_application_ids?.length || 0;
-      message(replacements
-        ? `Role removed as ${reason}. ${replacements} replacement draft${replacements === 1 ? "" : "s"} added to the current batch.`
-        : `Role removed as ${reason}. No safe replacement was available right now.`);
-      selectedApplication = null;
-      await load();
-      showTab("applications");
-    }
-
-    async function rejectApplicationFromCard(id) {
-      await rejectApplication(id);
-    }
-
-    async function rejectSelectedApplication() {
-      if (!selectedApplication) return;
-      await rejectApplication(selectedApplication.id);
-    }
-
-    async function generateApplication(job_id) {
-      await api("/api/applications/generate", {method: "POST", body: JSON.stringify({job_id})});
-      message("Application draft generated.");
-      await load();
-      showTab("applications");
-    }
-
-    async function saveApplication() {
-      if (!selectedApplication) return;
-      const payload = {
-        id: selectedApplication.id,
-        status: document.getElementById("edit_status").value,
-        queue_state: document.getElementById("edit_queue_state").value,
-        contact_email: document.getElementById("edit_contact_email").value,
-        contact_name: document.getElementById("edit_contact_name").value,
-        contact_role: document.getElementById("edit_contact_role").value,
-        company_notes: document.getElementById("edit_company_notes").value,
-        research_url: document.getElementById("edit_research_url").value,
-        research_notes: document.getElementById("edit_research_notes").value,
-        research_sources: document.getElementById("edit_research_sources").value,
-        next_follow_up: document.getElementById("edit_next_follow_up").value,
-        cover_letter: document.getElementById("edit_cover_letter").value,
-        cv_notes: document.getElementById("edit_cv_notes").value,
-        answers: document.getElementById("edit_answers").value,
-        follow_up: document.getElementById("edit_follow_up").value,
-        form_prep_overrides: collectFormPrepOverrides()
-      };
-      await api("/api/applications/save", {method: "POST", body: JSON.stringify(payload)});
-      message("Application saved and documents regenerated.");
-      await load();
-    }
-
-    async function regenerateFollowUp() {
-      if (!selectedApplication) return;
-      const payload = {
-        id: selectedApplication.id,
-        contact_email: document.getElementById("edit_contact_email").value,
-        contact_name: document.getElementById("edit_contact_name").value,
-        contact_role: document.getElementById("edit_contact_role").value,
-        company_notes: document.getElementById("edit_company_notes").value
-      };
-      const result = await api("/api/applications/regenerate-followup", {method: "POST", body: JSON.stringify(payload)});
-      document.getElementById("edit_follow_up").value = result.follow_up || "";
-      message("Personalized follow-up regenerated.");
-      await load();
-    }
-
-    async function humanizeApplication() {
-      if (!selectedApplication) return;
-      const payload = {
-        id: selectedApplication.id,
-        company_notes: document.getElementById("edit_company_notes").value,
-        cover_letter: document.getElementById("edit_cover_letter").value,
-        answers: document.getElementById("edit_answers").value,
-        follow_up: document.getElementById("edit_follow_up").value
-      };
-      const result = await api("/api/applications/humanize", {method: "POST", body: JSON.stringify(payload)});
-      document.getElementById("edit_cover_letter").value = result.cover_letter || "";
-      document.getElementById("edit_answers").value = result.answers || "";
-      document.getElementById("edit_follow_up").value = result.follow_up || "";
-      const flagged = Object.values(result.checks || {}).reduce((sum, check) => sum + ((check.flags || []).length || 0) + (check.long_sentence_count || 0), 0);
-      message(flagged ? `Humanized copy, but ${flagged} voice issue(s) still need review.` : "Humanized sent copy in Phillip's voice.");
-      await load();
-    }
-
-    async function researchApplication() {
-      if (!selectedApplication) return;
-      const payload = {
-        id: selectedApplication.id,
-        research_url: document.getElementById("edit_research_url").value,
-        company_notes: document.getElementById("edit_company_notes").value
-      };
-      const result = await api("/api/applications/research", {method: "POST", body: JSON.stringify(payload)});
-      document.getElementById("edit_research_url").value = result.research_url || "";
-      document.getElementById("edit_research_notes").value = result.research_notes || "";
-      document.getElementById("edit_research_sources").value = result.research_sources || "";
-      message("Company research notes generated.");
-      await load();
-    }
-
-    async function useSavedResearchUrlNow() {
-      if (!selectedApplication) return;
-      const saved = document.getElementById("edit_research_url").value.trim() || selectedApplication.research_url || "";
-      if (!saved) {
-        message("There is no saved research URL for this application yet.", "bad");
-        return;
-      }
-      const payload = {
-        id: selectedApplication.id,
-        research_url: saved,
-        company_notes: document.getElementById("edit_company_notes").value
-      };
-      const result = await api("/api/applications/research", {method: "POST", body: JSON.stringify(payload)});
-      document.getElementById("edit_research_url").value = result.research_url || saved;
-      document.getElementById("edit_research_notes").value = result.research_notes || "";
-      document.getElementById("edit_research_sources").value = result.research_sources || "";
-      message("Saved research URL used for a fresh research pass.");
-      await load();
-    }
-
-    async function prepareApplicationForm() {
-      if (!selectedApplication) return;
-      try {
-        await saveApplication();
-        const result = await api("/api/applications/prepare-form", {method: "POST", body: JSON.stringify({id: selectedApplication.id})});
-        message(`Visible browser launched for form preparation. Process ${result.pid}. If a CAPTCHA or MFA prompt appears, clear it in the browser and the run should continue. Use Resume form if you close the browser and need to restart from the saved task.`);
-      } catch (error) {
-        message(error.message || "Could not start form preparation.", "bad");
-      }
-    }
-
-    async function resumeApplicationForm() {
-      if (!selectedApplication) return;
-      try {
-        const result = await api("/api/applications/resume-form", {method: "POST", body: JSON.stringify({id: selectedApplication.id})});
-        message(`Form preparation resumed in a visible browser. Process ${result.pid}. If you cleared a challenge earlier, the saved session should carry forward.`);
-      } catch (error) {
-        message(error.message || "Could not resume form preparation.", "bad");
-      }
-    }
-
-    async function saveFormFillFeedback() {
-      if (!selectedApplication) return;
-      const payload = {
-        application_id: selectedApplication.id,
-        worked: document.getElementById("form_feedback_worked").value,
-        missed: document.getElementById("form_feedback_missed").value,
-        wrong: document.getElementById("form_feedback_wrong").value,
-        notes: document.getElementById("form_feedback_notes").value
-      };
-      await api("/api/applications/form-feedback", {method: "POST", body: JSON.stringify(payload)});
-      ["worked", "missed", "wrong", "notes"].forEach(key => {
-        document.getElementById(`form_feedback_${key}`).value = "";
-      });
-      message("Form-fill feedback saved.");
-      await load();
-    }
-
-    function showInlineApplyUrlPrompt(appId, jobUrl) {
-      const card = document.getElementById(`daily-card-${appId}`);
-      if (!card) return;
-      if (card.querySelector(".apply-url-prompt")) return;
-      if (jobUrl) window.open(jobUrl, "_blank", "noreferrer");
-      const prompt = document.createElement("div");
-      prompt.className = "apply-url-prompt notice";
-      prompt.style.marginTop = "10px";
-      prompt.innerHTML = `
-        <strong>Copy the Apply URL from the job listing that just opened, then paste it below:</strong>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <input id="apply-url-input-${appId}" type="url" placeholder="https://company.com/apply/..." style="flex:1">
-          <button class="btn primary" onclick="submitInlineApplyUrl(${appId})">Save &amp; launch</button>
-          <button class="btn" onclick="this.closest('.apply-url-prompt').remove()">Cancel</button>
-        </div>
-      `;
-      card.appendChild(prompt);
-      document.getElementById(`apply-url-input-${appId}`)?.focus();
-    }
-
-    async function submitInlineApplyUrl(appId) {
-      const input = document.getElementById(`apply-url-input-${appId}`);
-      const url = (input?.value || "").trim();
-      if (!url || !url.startsWith("http")) { message("Please paste a valid URL starting with https://", "bad"); return; }
-      const app = (state.applications || []).find(a => Number(a.id) === Number(appId));
-      if (!app) return;
-      await api("/api/applications/save", {method: "POST", body: JSON.stringify({id: appId, job_url_override: url})});
-      await api("/api/jobs/update-url", {method: "POST", body: JSON.stringify({job_id: app.job_id, url})});
-      message("Apply link saved — launching form now.");
-      await load();
-      selectApplication(appId, false);
-      await prepareApplicationForm();
-      showTab("applications");
-    }
-
-    async function prepareApplicationFromDashboard(id) {
-      const scrollY = window.scrollY;
-      selectApplication(id, false);
-      if (isBoardPrepBlockedApp(selectedApplication)) {
-        showInlineApplyUrlPrompt(id, selectedApplication?.url || "");
-        return;
-      }
-      await prepareApplicationForm();
-      window.scrollTo({top: scrollY, behavior: "instant"});
-    }
-
-    async function skipAllDailyReview() {
-      const apps = dailyReviewApplications();
-      if (!apps.length) return;
-      if (!confirm(`Remove all ${apps.length} pending applications and pull in replacements?`)) return;
-      const scrollY = window.scrollY;
-      for (const app of apps) {
-        try {
-          await api("/api/applications/reject-and-replace", {
-            method: "POST",
-            body: JSON.stringify({id: app.id, reason: "not interested", notes: ""})
-          });
-        } catch (e) {}
-      }
-      message(`Removed ${apps.length} applications. New ones will appear as sources run.`);
-      await load();
-      window.scrollTo({top: scrollY, behavior: "instant"});
-    }
-
-    async function notInterestedFromDashboard(id) {
-      const app = (state.applications || []).find(a => Number(a.id) === Number(id));
-      if (!app) return;
-      const scrollY = window.scrollY;
-      const result = await api("/api/applications/reject-and-replace", {
-        method: "POST",
-        body: JSON.stringify({id, reason: "not interested", notes: ""})
-      });
-      const replacements = result.replacement_application_ids?.length || 0;
-      message(replacements
-        ? `Removed. Pulled in ${replacements} replacement${replacements === 1 ? "" : "s"}.`
-        : "Removed. No replacement available right now — run Find Jobs to bring in more.");
-      await load();
-      window.scrollTo({top: scrollY, behavior: "instant"});
-    }
-
-    async function prepareApplicationCard(id) {
-      selectApplication(id, false);
-      if (isBoardPrepBlockedApp(selectedApplication)) {
-        message("This draft still points to a board listing, not the real apply page. Open the listing, find the direct company or ATS apply URL, then prepare the form from that real page.", "bad");
-        showTab("applications");
-        return;
-      }
-      await prepareApplicationForm();
-      showTab("applications");
-    }
-
-    async function resumeApplicationCard(id) {
-      selectApplication(id, false);
-      if (isBoardPrepBlockedApp(selectedApplication)) {
-        message("This draft still points to a board listing, not the real apply page. Replace it with a real apply URL before resuming form prep.", "bad");
-        showTab("applications");
-        return;
-      }
-      await resumeApplicationForm();
-      showTab("applications");
-    }
-
-    async function runFormFillSmokeTest() {
-      const result = await api("/api/form-fill/smoke", {method: "POST", body: "{}"});
-      message(`Smoke-test browser launched. Process ${result.pid}. Check that the fake form fields are filled, then close the browser.`);
-    }
-
-    async function markApplicationSubmitted() {
-      if (!selectedApplication) return;
-      document.getElementById("edit_status").value = "submitted";
-      const followUp = new Date();
-      followUp.setDate(followUp.getDate() + 7);
-      document.getElementById("edit_next_follow_up").value = followUp.toISOString().slice(0, 10);
-      await saveApplication();
-      await setJobStatus(selectedApplication.job_id, "applied");
-      message("Application marked submitted. Follow-up scheduled for 7 days from today.");
-    }
-
-    async function markApplicationSubmittedFromDashboard(id) {
-      const scrollY = window.scrollY;
-      selectApplication(id, false);
-      await markApplicationSubmitted();
-      window.scrollTo({top: scrollY, behavior: "instant"});
-    }
-
-    async function saveEmailConfig() {
-      const payload = {
-        host: document.getElementById("email_host").value,
-        port: document.getElementById("email_port").value,
-        user: document.getElementById("email_user").value,
-        from: document.getElementById("email_from").value,
-        to: document.getElementById("email_to").value,
-        password: document.getElementById("email_password").value,
-        starttls: document.getElementById("email_starttls").checked
-      };
-      await api("/api/email/config", {method: "POST", body: JSON.stringify(payload)});
-      document.getElementById("email_password").value = "";
-      message("Email settings saved locally.");
-      await load();
-    }
-
-    async function saveInboxConfig() {
-      const payload = {
-        host: document.getElementById("inbox_host").value,
-        port: document.getElementById("inbox_port").value,
-        user: document.getElementById("inbox_user").value,
-        mailbox: document.getElementById("inbox_mailbox").value,
-        lookback_days: document.getElementById("inbox_lookback_days").value,
-        password: document.getElementById("inbox_password").value,
-        ssl: document.getElementById("inbox_ssl").checked
-      };
-      await api("/api/email/inbox-config", {method: "POST", body: JSON.stringify(payload)});
-      document.getElementById("inbox_password").value = "";
-      message("Inbox settings saved locally.");
-      await load();
-    }
-
-    async function scanInbox() {
-      await saveInboxConfig();
-      const result = await api("/api/email/scan-inbox", {method: "POST", body: JSON.stringify({limit: 80})});
-      message(`Inbox scan complete: ${result.imported || 0} new message(s), ${result.matched || 0} matched.`);
-      await load();
-      showTab("email");
-    }
-
-    async function markInbox(id, status, applicationStatus = "", leadStatus = "") {
-      await api("/api/inbox/status", {
-        method: "POST",
-        body: JSON.stringify({id, status, application_status: applicationStatus, lead_status: leadStatus})
-      });
-      message("Inbox reply updated.");
-      await load();
-      showTab("email");
-    }
-
-    async function matchInboxToApplication(id) {
-      const options = (state.applications || [])
-        .slice()
-        .sort((a, b) => Number(b.id) - Number(a.id))
-        .slice(0, 20)
-        .map(app => `${app.id}: ${app.company} - ${app.title}`)
-        .join("\\n");
-      const value = prompt(`Enter application ID to match this reply:\\n\\n${options}`);
-      if (!value) return;
-      const applicationId = Number(String(value).split(":")[0].trim());
-      if (!applicationId) return message("Enter a valid application ID.", "bad");
-      await api("/api/inbox/match", {method: "POST", body: JSON.stringify({id, application_id: applicationId})});
-      message("Inbox reply matched to application.");
-      await load();
-      showTab("email");
-    }
-
-    async function matchInboxToLead(id) {
-      const options = (state.leads || [])
-        .slice()
-        .sort((a, b) => Number(b.id) - Number(a.id))
-        .slice(0, 20)
-        .map(lead => `${lead.id}: ${lead.company || "Unnamed company"} ${lead.contact_email ? "- " + lead.contact_email : ""}`)
-        .join("\\n");
-      const value = prompt(`Enter outreach lead ID to match this reply:\\n\\n${options || "No outreach leads saved."}`);
-      if (!value) return;
-      const leadId = Number(String(value).split(":")[0].trim());
-      if (!leadId) return message("Enter a valid outreach lead ID.", "bad");
-      await api("/api/inbox/match", {method: "POST", body: JSON.stringify({id, lead_id: leadId})});
-      message("Inbox reply matched to outreach lead.");
-      await load();
-      showTab("email");
-    }
-
-    async function sendTestEmail() {
-      await saveEmailConfig();
-      await api("/api/email/test", {method: "POST", body: JSON.stringify({to: document.getElementById("email_to").value})});
-      message("Test email sent.");
-    }
-
-    async function sendFollowUp() {
-      if (!selectedApplication) return;
-      await sendFollowUpFor(selectedApplication.id);
-    }
-
-    async function sendFollowUpFor(id) {
-      const app = state.applications.find(item => item.id === id) || selectedApplication;
-      if (!app) return;
-      if (!selectedApplication || selectedApplication.id !== id) {
-        selectedApplication = app;
-      }
-      const existing = document.getElementById("edit_contact_email")?.value || app.contact_email || "";
-      const to = prompt("Recipient email address for this follow-up:", existing);
-      if (!to) return;
-      if (document.getElementById("edit_contact_email")) {
-        document.getElementById("edit_contact_email").value = to;
-        await saveApplication();
-      }
-      await api("/api/email/send-followup", {method: "POST", body: JSON.stringify({id, to})});
-      message("Follow-up email sent.");
-      await load();
-    }
-
-    function mailto(app) {
-      const subject = encodeURIComponent(`Follow-up on ${app.title} application`);
-      const body = encodeURIComponent(app.follow_up || "");
-      return `mailto:?subject=${subject}&body=${body}`;
-    }
-
-    function escapeHtml(value) {
-      return String(value ?? "").replace(/[&<>"']/g, ch => ({
-        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-      }[ch]));
-    }
-
-    function escapeAttr(value) {
-      return escapeHtml(value).replace(/`/g, "&#96;");
-    }
-
-    load()
-      .then(() => { if (window.lucide) lucide.createIcons(); })
-      .catch(error => message(error.message, "bad"));
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", () => { if (window.lucide) lucide.createIcons(); });
-    } else if (window.lucide) {
-      lucide.createIcons();
-    }
-  </script>
+</div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+let state = {};
+let currentTab = 'queue';
+let toastTimer;
+
+// ── Tab switching ──────────────────────────────
+function switchTab(tab, btn) {
+  currentTab = tab;
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + tab));
+  render();
+}
+
+// ── Load & render ──────────────────────────────
+async function load() {
+  try {
+    const res = await fetch('/api/state');
+    state = await res.json();
+    render();
+  } catch(e) {
+    toast('Failed to load data', true);
+  }
+}
+
+function render() {
+  updateCounts();
+  if (currentTab === 'queue') renderQueue();
+  else if (currentTab === 'applied') renderApplied();
+  else if (currentTab === 'sources') renderSources();
+  else if (currentTab === 'profile') renderProfile();
+}
+
+function updateCounts() {
+  const jobs = state.jobs || [];
+  const apps = state.apps || [];
+  const shortlisted = jobs.filter(j => j.status === 'shortlisted').length;
+  const swipeable = jobs.filter(j => j.status === 'new').length;
+  nb('nb-queue', shortlisted);
+  nb('nb-applied', apps.length);
+  const totalSrcs = (state.sources || []).filter(s => s.enabled).length;
+  document.getElementById('sidebar-status').textContent =
+    `${swipeable} jobs to swipe · ${totalSrcs} sources active`;
+}
+
+function nb(id, n) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = n > 0 ? n : '';
+}
+
+// ── Queue ──────────────────────────────────────
+function renderQueue() {
+  const jobs = (state.jobs || []).filter(j => j.status === 'shortlisted');
+  const body = document.getElementById('queue-body');
+  const countEl = document.getElementById('q-count');
+  countEl.textContent = jobs.length;
+
+  if (!jobs.length) {
+    body.innerHTML = `<div class="empty">
+      <div class="empty-icon">🃏</div>
+      <h2>Queue is empty</h2>
+      <p>Swipe right on jobs you like and they'll appear here.</p>
+      <button class="btn btn-primary" onclick="location.href='/swipe'" style="margin-top:8px">Go swipe</button>
+    </div>`;
+    return;
+  }
+
+  body.innerHTML = `<div class="job-grid">${jobs.map(jobCard).join('')}</div>`;
+}
+
+function jobCard(job) {
+  const init = (job.company || '?').charAt(0).toUpperCase();
+  const remote = remoteTag(job);
+  return `<div class="jcard" id="jc-${job.id}">
+    <div class="jcard-top">
+      <div class="jcard-avatar">${init}</div>
+      <div class="jcard-meta">
+        <div class="jcard-company">${esc(job.company)}</div>
+        <div class="jcard-title">${esc(job.title)}</div>
+        <div class="jcard-loc">${esc(job.location || '')}</div>
+      </div>
+    </div>
+    <div class="jcard-tags">
+      <span class="tag tag-${remote}">${remote}</span>
+      ${job.score >= 50 ? `<span class="tag tag-score">Score ${job.score}</span>` : ''}
+      ${job.source ? `<span class="tag" style="background:var(--surface2);color:var(--muted)">${esc(job.source)}</span>` : ''}
+    </div>
+    <div class="jcard-actions">
+      <button class="btn-apply" onclick="applyJob(${job.id},${JSON.stringify(job.url||'')})">Open &amp; Apply →</button>
+      <button class="btn-remove" onclick="removeJob(${job.id})">✕</button>
+    </div>
+  </div>`;
+}
+
+function remoteTag(job) {
+  const t = ((job.location||'')+(job.description||'')).toLowerCase();
+  if (t.includes('remote')) return 'remote';
+  if (t.includes('hybrid')) return 'hybrid';
+  return 'onsite';
+}
+
+async function applyJob(id, url) {
+  if (url) window.open(url, '_blank');
+  await post('/api/jobs/status', {id, status: 'applied'});
+  document.getElementById('jc-'+id)?.remove();
+  const remaining = document.querySelectorAll('.jcard').length;
+  document.getElementById('q-count').textContent = remaining;
+  toast('Marked as applied ✓');
+}
+
+async function removeJob(id) {
+  await post('/api/jobs/status', {id, status: 'rejected', reject_reason: 'removed from queue'});
+  document.getElementById('jc-'+id)?.remove();
+  const remaining = document.querySelectorAll('.jcard').length;
+  document.getElementById('q-count').textContent = remaining;
+  toast('Removed');
+}
+
+// ── Applied ────────────────────────────────────
+function renderApplied() {
+  const apps = state.apps || [];
+  const body = document.getElementById('applied-body');
+  document.getElementById('a-count').textContent = apps.length;
+
+  if (!apps.length) {
+    body.innerHTML = `<div class="empty"><div class="empty-icon">📋</div><h2>No applications yet</h2><p>Apply to jobs from your queue to track them here.</p></div>`;
+    return;
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  const sorted = [...apps].sort((a,b) => {
+    const ad = a.next_follow_up && a.next_follow_up <= today;
+    const bd = b.next_follow_up && b.next_follow_up <= today;
+    if (ad && !bd) return -1;
+    if (!ad && bd) return 1;
+    return (b.updated_at||'').localeCompare(a.updated_at||'');
+  });
+
+  body.innerHTML = `<div class="app-list">${sorted.map(a => appRow(a, today)).join('')}</div>`;
+}
+
+function appRow(app, today) {
+  const due = app.next_follow_up && app.next_follow_up <= today;
+  const submitted = (app.status === 'submitted') || ((state.jobs||[]).find(j=>j.id===app.job_id)?.status === 'applied');
+  const cls = due ? 'status-due' : submitted ? 'status-submitted' : 'status-draft';
+  const label = due ? '⚠ Follow-up due' : submitted ? 'Submitted' : 'Draft';
+  const followUpHref = app.follow_up
+    ? `mailto:${esc(app.contact_email||'')}?subject=${encodeURIComponent('Following up on my application — '+app.title)}&body=${encodeURIComponent(app.follow_up)}`
+    : null;
+
+  return `<div class="app-row${due?' follow-up-due':''}">
+    <span class="status-badge ${cls}">${label}</span>
+    <div class="app-info">
+      <div class="app-title">${esc(app.title||'Untitled')}</div>
+      <div class="app-company">${esc(app.company||'')}${app.location?' · '+esc(app.location):''}</div>
+    </div>
+    <div class="app-right">
+      ${app.next_follow_up ? `<div class="app-date">Follow-up: ${app.next_follow_up}</div>` : ''}
+      <div class="app-btns">
+        ${app.url ? `<a href="${esc(app.url)}" target="_blank" class="btn btn-ghost btn-sm">View job</a>` : ''}
+        ${due && followUpHref ? `<a href="${followUpHref}" class="btn btn-sm" style="background:rgba(245,158,11,0.2);color:var(--yellow)">Send follow-up</a>` : ''}
+        ${!submitted ? `<button class="btn btn-sm btn-success" onclick="markSubmitted(${app.job_id})">Mark submitted</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+async function markSubmitted(jobId) {
+  await post('/api/jobs/status', {id: jobId, status: 'applied'});
+  toast('Marked as submitted ✓');
+  await load();
+}
+
+// ── Sources ────────────────────────────────────
+function renderSources() {
+  const sources = state.sources || [];
+  const body = document.getElementById('sources-body');
+
+  if (!sources.length) {
+    body.innerHTML = `<div class="empty"><p>No sources yet. Add one below.</p></div>`;
+    return;
+  }
+
+  body.innerHTML = `<div class="sources-list">${sources.map(sourceRow).join('')}</div>`;
+}
+
+function sourceRow(s) {
+  const on = !!s.enabled;
+  const lastRun = s.last_run ? s.last_run.split('T')[0] : 'Never';
+  const result = s.last_result ? ` · ${s.last_result}` : '';
+  return `<div class="source-row${on?'':' disabled'}" id="src-${s.id}">
+    <div class="source-dot ${on?'on':'off'}"></div>
+    <div class="source-info">
+      <div class="source-name">${esc(s.name||s.token||s.source_type)}</div>
+      <div class="source-meta">${esc(s.source_type)} · Last run: ${lastRun}${esc(result)}</div>
+    </div>
+    <div class="source-actions">
+      <button class="btn btn-ghost btn-sm" onclick="runSource(${s.id}, this)">▶ Run</button>
+      <button class="btn btn-sm ${on?'btn-danger':'btn-success'}" onclick="toggleSource(${s.id}, ${on?0:1})">${on?'Disable':'Enable'}</button>
+    </div>
+  </div>`;
+}
+
+async function runSource(id, btn) {
+  const orig = btn.textContent;
+  btn.textContent = '...';
+  btn.disabled = true;
+  try {
+    const res = await post('/api/sources/run', {id});
+    toast(res.message || res.result || 'Done');
+    await load();
+  } catch(e) { toast('Error running source', true); }
+  finally { btn.textContent = orig; btn.disabled = false; }
+}
+
+async function toggleSource(id, enabled) {
+  await post('/api/sources/toggle', {id, enabled});
+  await load();
+}
+
+async function runAll() {
+  const prog = document.getElementById('run-progress');
+  const msg = document.getElementById('run-msg');
+  prog.classList.add('active');
+  msg.textContent = 'Running all sources...';
+  try {
+    const res = await post('/api/sources/run-all', {});
+    msg.textContent = res.message || 'Done!';
+    await load();
+    setTimeout(() => prog.classList.remove('active'), 3000);
+  } catch(e) {
+    msg.textContent = 'Error running sources';
+    setTimeout(() => prog.classList.remove('active'), 3000);
+  }
+}
+
+function updateSourceHints() {
+  const type = document.getElementById('s-type').value;
+  const hints = {
+    greenhouse: 'Board token (e.g. takealot)',
+    lever: 'Company slug (e.g. buffer)',
+    ashby: 'Board name (e.g. canva)',
+    smartrecruiters: 'Company ID',
+    recruitee: 'Subdomain',
+    workable: 'Subdomain',
+    teamtailor: 'Subdomain',
+    jobicy_rss: 'Category (e.g. marketing)',
+    remotive: 'Category (e.g. marketing)',
+    arbeitnow: 'Leave blank or enter tag',
+    adzuna: 'Search query (e.g. marketing cape town)',
+    indeed_rss: 'Search query',
+    weworkremotely_rss: 'Leave blank',
+    public: 'Careers page URL',
+    direct: 'Direct job URL',
+  };
+  document.getElementById('s-token').placeholder = hints[type] || '';
+  document.getElementById('s-token-label').textContent =
+    ['public','direct'].includes(type) ? 'URL' : 'Board Token / Slug';
+}
+
+async function addSource() {
+  const name = document.getElementById('s-name').value.trim();
+  const type = document.getElementById('s-type').value;
+  const token = document.getElementById('s-token').value.trim();
+  const query = document.getElementById('s-query').value.trim();
+  if (!token && !['arbeitnow','weworkremotely_rss','remotive'].includes(type)) {
+    toast('Please enter a board token or URL', true); return;
+  }
+  await post('/api/sources/save', {name: name||token, source_type: type, token, query, enabled: 1});
+  document.getElementById('s-name').value = '';
+  document.getElementById('s-token').value = '';
+  document.getElementById('s-query').value = '';
+  toast('Source added ✓');
+  await load();
+}
+
+// ── Profile ────────────────────────────────────
+function renderProfile() {
+  const p = state.profile || {};
+  const fields = ['full_name','email','phone','location','linkedin_url','portfolio_url','salary_expectation','cv_text'];
+  fields.forEach(f => {
+    const el = document.getElementById('p-'+f);
+    if (el) el.value = p[f] || '';
+  });
+}
+
+async function saveProfile() {
+  const fields = ['full_name','email','phone','location','linkedin_url','portfolio_url','salary_expectation','cv_text'];
+  const data = {};
+  fields.forEach(f => {
+    const el = document.getElementById('p-'+f);
+    if (el) data[f] = el.value;
+  });
+  await post('/api/profile', data);
+  toast('Profile saved ✓');
+}
+
+// ── Helpers ────────────────────────────────────
+function esc(str) {
+  return String(str||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function post(path, body) {
+  const res = await fetch(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return res.json();
+}
+
+function toast(msg, err=false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.background = err ? '#7f1d1d' : '#1c1c1e';
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+load();
+</script>
 </body>
-</html>
-"""
+</html>"""
 
 
 def main() -> int:
