@@ -28,6 +28,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 import zipfile
 import zlib
 from email import policy
@@ -51,11 +52,12 @@ NOTIFIED_REMINDERS_PATH = REMINDERS_DIR / "notified-reminders.json"
 DB_PATH = DATA_DIR / "job_application_ai.sqlite3"
 ENV_PATH = ROOT / ".env"
 SESSION_MEMORY_PATH = ROOT / "SESSION_MEMORY.md"
-HOST = "127.0.0.1"
-PORT = int(os.environ.get("JOB_AI_PORT", "8765"))
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", os.environ.get("JOB_AI_PORT", "8765")))
 DISCOVERY_CHECK_SECONDS = 600
+AUTH_PASSWORD = os.environ.get("JOB_AI_PASSWORD", "")
 
-CV_PATH = "/Users/phillip/Desktop/PHILLIP PERSONAL/Phillip_de_Nobrega_CV.pdf"
+CV_PATH = os.environ.get("JOB_AI_CV_PATH", "/Users/phillip/Desktop/PHILLIP PERSONAL/Phillip_de_Nobrega_CV.pdf")
 
 
 DEFAULT_PROFILE: dict[str, str] = {
@@ -582,6 +584,124 @@ STARTER_JOB_SOURCES = [
         "name": "Decathlon SA sports retail",
         "source_type": "careers",
         "token": "https://www.decathlon.co.za/pages/careers",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    # --- Indeed RSS: SA + remote marketing ---
+    {
+        "name": "Indeed Cape Town marketing (RSS)",
+        "source_type": "indeed_rss",
+        "token": "Cape Town, Western Cape",
+        "query": "marketing junior graduate content social media brand",
+    },
+    {
+        "name": "Indeed remote marketing roles (RSS)",
+        "source_type": "indeed_rss",
+        "token": "remote",
+        "query": "marketing junior graduate remote content brand",
+    },
+    # --- Jobicy RSS: verified working remote job board ---
+    {
+        "name": "Jobicy remote marketing jobs (RSS)",
+        "source_type": "jobicy_rss",
+        "token": "marketing",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Jobicy remote copywriting jobs (RSS)",
+        "source_type": "jobicy_rss",
+        "token": "copywriting",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    # --- SA company careers pages ---
+    {
+        "name": "Takealot SA e-commerce",
+        "source_type": "careers",
+        "token": "https://www.takealot.com/about/careers",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Superbalist fashion retail SA",
+        "source_type": "careers",
+        "token": "https://superbalist.com/about/careers",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Yoco fintech SA",
+        "source_type": "careers",
+        "token": "https://www.yoco.com/za/careers/",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Peach Payments SA fintech",
+        "source_type": "careers",
+        "token": "https://www.peachpayments.com/careers",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "CareerJunction all marketing SA",
+        "source_type": "careers",
+        "token": "https://www.careerjunction.co.za/jobs/marketing",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "PNet Cape Town marketing",
+        "source_type": "careers",
+        "token": "https://www.pnet.co.za/jobs/marketing/cape-town/western-cape/1/",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Careers24 marketing Cape Town",
+        "source_type": "careers",
+        "token": "https://www.careers24.com/jobs/?keyterms=marketing&location=Cape+Town",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "WorkAfrica marketing Cape Town",
+        "source_type": "careers",
+        "token": "https://workafrica.co.za/jobs/marketing/cape-town",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    # --- Remote-friendly global companies on Greenhouse/Lever/Ashby ---
+    {
+        "name": "Buffer remote social media",
+        "source_type": "greenhouse",
+        "token": "buffer",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Mailchimp email marketing",
+        "source_type": "greenhouse",
+        "token": "mailchimp",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Hootsuite social media platform",
+        "source_type": "greenhouse",
+        "token": "hootsuite",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Sprout Social marketing",
+        "source_type": "lever",
+        "token": "sproutsocial",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Later social media tool",
+        "source_type": "lever",
+        "token": "later",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Canva design platform",
+        "source_type": "greenhouse",
+        "token": "canva",
+        "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
+    },
+    {
+        "name": "Notion productivity tool",
+        "source_type": "greenhouse",
+        "token": "notion",
         "query": GRADUATE_MARKETING_DISCOVERY_QUERY,
     },
 ]
@@ -1884,10 +2004,13 @@ def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> int:
     )
     timestamp = now_iso()
     if url:
-        existing = conn.execute("select id from jobs where url = ?", (url,)).fetchone()
+        existing = conn.execute("select id, status from jobs where url = ?", (url,)).fetchone()
     else:
         existing = None
     if existing:
+        # Never overwrite a job Phillip already rejected — it stays gone
+        if str(existing["status"]) == "rejected":
+            return int(existing["id"])
         conn.execute(
             """
             update jobs
@@ -1899,6 +2022,17 @@ def upsert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> int:
         )
         conn.commit()
         return int(existing["id"])
+
+    # Before inserting, check title+company fingerprint so the same role from a
+    # different source URL doesn't re-surface after being rejected.
+    title_fp = title.lower().strip()
+    company_fp = company.lower().strip()
+    dup_rejected = conn.execute(
+        "select id from jobs where lower(trim(title))=? and lower(trim(company))=? and status='rejected'",
+        (title_fp, company_fp),
+    ).fetchone()
+    if dup_rejected:
+        return int(dup_rejected["id"])
 
     cur = conn.execute(
         """
@@ -2307,6 +2441,248 @@ def discover_arbeitnow(conn: sqlite3.Connection, token: str = "", query: str = "
     return {"count": len(ids), "ids": ids, "mode": "arbeitnow-public-api"}
 
 
+def _parse_rss_items(body: str) -> list[ET.Element]:
+    """Parse an RSS/Atom body and return the list of <item> elements."""
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        # Some feeds have a BOM or encoding declaration — strip it and retry
+        body = body.lstrip("﻿").split("?>", 1)[-1]
+        root = ET.fromstring(body)
+    ns_strip = re.compile(r"\{[^}]*\}")
+    channel = root.find("channel")
+    if channel is None:
+        # Atom feed fallback
+        return root.findall("{http://www.w3.org/2005/Atom}entry")
+    return channel.findall("item")
+
+
+def _rss_text(item: ET.Element, tag: str, default: str = "") -> str:
+    """Get text of a child tag from an RSS item, ignoring namespace."""
+    el = item.find(tag)
+    if el is not None and el.text:
+        return normalize_space(el.text)
+    # Try stripping namespace prefix from all children
+    for child in item:
+        local = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if local == tag and child.text:
+            return normalize_space(child.text)
+    return default
+
+
+def discover_indeed_rss(conn: sqlite3.Connection, token: str = "", query: str = "") -> dict[str, Any]:
+    """
+    Scrape Indeed's public RSS feed for SA and remote marketing roles.
+    token = location string, e.g. 'Cape Town, Western Cape' or 'remote'.
+    Tries za.indeed.com first, falls back to www.indeed.com for remote.
+    """
+    location = token or "Cape Town, Western Cape"
+    search_q = query or "marketing junior graduate"
+    ids: list[int] = []
+    endpoints = [
+        f"https://za.indeed.com/rss?q={urllib.parse.quote_plus(search_q)}&l={urllib.parse.quote_plus(location)}&sort=date&fromage=30",
+        f"https://www.indeed.com/rss?q={urllib.parse.quote_plus(search_q + ' remote')}&sort=date&fromage=14",
+    ]
+    seen_urls: set[str] = set()
+    for feed_url in endpoints:
+        try:
+            status, body, _ = fetch_url(feed_url, timeout=25)
+        except Exception:
+            continue
+        if status >= 400:
+            continue
+        try:
+            items = _parse_rss_items(body)
+        except Exception:
+            continue
+        for item in items[:60]:
+            title = _rss_text(item, "title")
+            job_url = _rss_text(item, "link") or _rss_text(item, "guid")
+            description = plain_text_from_html(_rss_text(item, "description"))
+            job_location = _rss_text(item, "location") or location
+            # Indeed often puts "Role - Company" in the title
+            company = ""
+            if " - " in title:
+                parts = title.rsplit(" - ", 1)
+                title = parts[0].strip()
+                company = parts[1].strip()
+            if not title or not job_url or job_url in seen_urls:
+                continue
+            seen_urls.add(job_url)
+            if not should_keep_discovered_role(title, company, description, query, job_location, job_url):
+                continue
+            ids.append(upsert_job(conn, {
+                "title": title,
+                "company": company or "Indeed listing",
+                "location": job_location,
+                "url": job_url,
+                "source": f"indeed_rss:{location}",
+                "description": description,
+                "raw_json": {"source": "indeed_rss", "feed": feed_url},
+            }))
+    return {"count": len(ids), "ids": ids, "mode": "indeed-rss"}
+
+
+def discover_weworkremotely_rss(conn: sqlite3.Connection, token: str = "", query: str = "") -> dict[str, Any]:
+    """
+    Fetch WeWorkRemotely marketing RSS feed.
+    token = WWR category slug, defaults to 'remote-marketing-jobs'.
+    """
+    category = token or "remote-marketing-jobs"
+    feed_url = f"https://weworkremotely.com/categories/{urllib.parse.quote(category)}.rss"
+    status, body, _ = fetch_url(feed_url, timeout=25)
+    if status >= 400:
+        # Fall back to the full jobs RSS
+        feed_url = "https://weworkremotely.com/remote-jobs.rss"
+        status, body, _ = fetch_url(feed_url, timeout=25)
+        if status >= 400:
+            raise RuntimeError(f"WeWorkRemotely RSS returned HTTP {status}")
+    try:
+        items = _parse_rss_items(body)
+    except Exception as exc:
+        raise RuntimeError(f"WeWorkRemotely RSS parse error: {exc}")
+    ids: list[int] = []
+    for item in items[:80]:
+        title = _rss_text(item, "title")
+        job_url = _rss_text(item, "link") or _rss_text(item, "guid")
+        description = plain_text_from_html(_rss_text(item, "description"))
+        region = _rss_text(item, "region") or "Worldwide"
+        company = _rss_text(item, "company")
+        # WWR title format: "Company: Role Title"
+        if ": " in title and not company:
+            parts = title.split(": ", 1)
+            company = parts[0].strip()
+            title = parts[1].strip()
+        if not title or not job_url:
+            continue
+        job_location = f"Remote - {region}" if "remote" not in region.lower() else region
+        if not should_keep_discovered_role(title, company, description, query, job_location, job_url):
+            continue
+        ids.append(upsert_job(conn, {
+            "title": title,
+            "company": company or "WeWorkRemotely listing",
+            "location": job_location,
+            "url": job_url,
+            "source": "weworkremotely_rss",
+            "description": description,
+            "raw_json": {"source": "weworkremotely_rss", "region": region, "feed": feed_url},
+        }))
+    return {"count": len(ids), "ids": ids, "mode": "weworkremotely-rss"}
+
+
+def discover_adzuna(conn: sqlite3.Connection, token: str = "", query: str = "") -> dict[str, Any]:
+    """
+    Adzuna job search API — has a South Africa endpoint.
+    token = 'app_id:app_key'  OR set ADZUNA_APP_ID / ADZUNA_APP_KEY in .env.
+    Free tier: 250 calls/day. Covers Cape Town, Johannesburg, remote SA roles.
+    Sign up at: https://developer.adzuna.com/
+    """
+    app_id = ""
+    app_key = ""
+    if ":" in token:
+        parts = token.split(":", 1)
+        app_id = parts[0].strip()
+        app_key = parts[1].strip()
+    app_id = app_id or os.environ.get("ADZUNA_APP_ID", "")
+    app_key = app_key or os.environ.get("ADZUNA_APP_KEY", "")
+    if not app_id or not app_key:
+        raise RuntimeError(
+            "Adzuna needs credentials. Add ADZUNA_APP_ID and ADZUNA_APP_KEY to your .env file "
+            "— free tier at https://developer.adzuna.com/"
+        )
+    search_q = query or "marketing junior graduate"
+    params = urllib.parse.urlencode({
+        "app_id": app_id,
+        "app_key": app_key,
+        "results_per_page": 50,
+        "what": search_q,
+        "where": "Cape Town",
+        "sort_by": "date",
+        "distance": 50,
+    })
+    feed_url = f"https://api.adzuna.com/v1/api/jobs/za/search/1?{params}"
+    status, body, _ = fetch_url(feed_url, timeout=25)
+    if status >= 400:
+        raise RuntimeError(f"Adzuna API returned HTTP {status}: {body[:200]}")
+    payload = json.loads(body)
+    results = payload.get("results", [])
+    ids: list[int] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        title = normalize_space(str(item.get("title") or ""))
+        company_obj = item.get("company") or {}
+        company = normalize_space(str(company_obj.get("display_name") or ""))
+        location_obj = item.get("location") or {}
+        location = normalize_space(str(location_obj.get("display_name") or "Cape Town, South Africa"))
+        description = normalize_space(str(item.get("description") or ""))
+        job_url = normalize_space(str(item.get("redirect_url") or ""))
+        if not title or not job_url:
+            continue
+        if not should_keep_discovered_role(title, company, description, query, location, job_url):
+            continue
+        ids.append(upsert_job(conn, {
+            "title": title,
+            "company": company or "Adzuna listing",
+            "location": location,
+            "url": job_url,
+            "source": "adzuna",
+            "description": description,
+            "raw_json": item,
+        }))
+    return {"count": len(ids), "ids": ids, "mode": "adzuna-api"}
+
+
+def discover_jobicy_rss(conn: sqlite3.Connection, token: str = "", query: str = "") -> dict[str, Any]:
+    """
+    Jobicy remote jobs RSS feed — reliably returns real job data.
+    token = category slug, e.g. 'marketing' (default) or 'copywriting'.
+    Free, no API key needed. https://jobicy.com
+    """
+    category = token or "marketing"
+    feed_url = (
+        f"https://jobicy.com/?feed=job_feed"
+        f"&job_categories={urllib.parse.quote(category)}"
+        f"&job_types=full-time"
+    )
+    status, body, _ = fetch_url(feed_url, timeout=25)
+    if status >= 400:
+        raise RuntimeError(f"Jobicy RSS returned HTTP {status}")
+    try:
+        items = _parse_rss_items(body)
+    except Exception as exc:
+        raise RuntimeError(f"Jobicy RSS parse error: {exc}")
+    JOBICY_NS = "https://jobicy.com"
+    ids: list[int] = []
+    for item in items[:60]:
+        title = _rss_text(item, "title")
+        job_url = _rss_text(item, "link") or _rss_text(item, "guid")
+        description = plain_text_from_html(
+            _rss_text(item, f"{{{JOBICY_NS}}}description")
+            or _rss_text(item, "{http://purl.org/rss/1.0/modules/content/}encoded")
+            or _rss_text(item, "description")
+        )
+        location = _rss_text(item, f"{{{JOBICY_NS}}}location") or "Remote"
+        company = _rss_text(item, f"{{{JOBICY_NS}}}company") or ""
+        job_type = _rss_text(item, f"{{{JOBICY_NS}}}job_type") or ""
+        if "remote" not in location.lower():
+            location = f"Remote - {location}"
+        if not title or not job_url:
+            continue
+        if not should_keep_discovered_role(title, company, description, query, location, job_url):
+            continue
+        ids.append(upsert_job(conn, {
+            "title": title,
+            "company": company or "Jobicy listing",
+            "location": location,
+            "url": job_url,
+            "source": f"jobicy:{category}",
+            "description": "\n\n".join(p for p in [description, f"Type: {job_type}" if job_type else ""] if p),
+            "raw_json": {"source": "jobicy_rss", "category": category},
+        }))
+    return {"count": len(ids), "ids": ids, "mode": "jobicy-rss"}
+
+
 def discover_workable_public(conn: sqlite3.Connection, token_or_url: str, query: str = "") -> dict[str, Any]:
     account = workable_account_from_token(token_or_url)
     if not account:
@@ -2447,7 +2823,7 @@ def save_job_source(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
     source_type = normalize_space(str(data.get("source_type", ""))).lower()
     token = normalize_space(str(data.get("token", "")))
     query = normalize_space(str(data.get("query", "")))
-    if not query and source_type in {"greenhouse", "lever", "ashby", "smartrecruiters", "recruitee", "remotive", "remoteok", "arbeitnow", "workable", "teamtailor", "careers", "url"}:
+    if not query and source_type in {"greenhouse", "lever", "ashby", "smartrecruiters", "recruitee", "remotive", "remoteok", "arbeitnow", "workable", "teamtailor", "careers", "url", "indeed_rss", "weworkremotely_rss", "adzuna", "jobicy_rss"}:
         query = GRADUATE_MARKETING_DISCOVERY_QUERY
     enabled = 1 if data.get("enabled", True) else 0
     if not source_type or not token:
@@ -2491,7 +2867,7 @@ def run_job_source(conn: sqlite3.Connection, source: dict[str, Any]) -> dict[str
     source_type = str(source.get("source_type", "")).lower()
     token = str(source.get("token", ""))
     query = str(source.get("query", ""))
-    if not query and source_type in {"greenhouse", "lever", "ashby", "smartrecruiters", "recruitee", "remotive", "remoteok", "arbeitnow", "workable", "teamtailor", "careers", "url"}:
+    if not query and source_type in {"greenhouse", "lever", "ashby", "smartrecruiters", "recruitee", "remotive", "remoteok", "arbeitnow", "workable", "teamtailor", "careers", "url", "indeed_rss", "weworkremotely_rss", "adzuna", "jobicy_rss"}:
         query = GRADUATE_MARKETING_DISCOVERY_QUERY
     if source_type == "greenhouse":
         result = discover_greenhouse(conn, token, query)
@@ -2509,6 +2885,14 @@ def run_job_source(conn: sqlite3.Connection, source: dict[str, Any]) -> dict[str
         raise RuntimeError("RemoteOK is disabled — jobs there require account signup before applying.")
     elif source_type == "arbeitnow":
         result = discover_arbeitnow(conn, token, query)
+    elif source_type == "indeed_rss":
+        result = discover_indeed_rss(conn, token, query)
+    elif source_type == "weworkremotely_rss":
+        result = discover_weworkremotely_rss(conn, token, query)
+    elif source_type == "adzuna":
+        result = discover_adzuna(conn, token, query)
+    elif source_type == "jobicy_rss":
+        result = discover_jobicy_rss(conn, token, query)
     elif source_type == "workable":
         result = discover_workable_public(conn, token, query)
     elif source_type == "teamtailor":
@@ -7023,12 +7407,49 @@ def unescape_pdf_literal(value: bytes) -> str:
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "JobApplicationAI/0.1"
 
+    def _check_auth(self) -> bool:
+        if not AUTH_PASSWORD:
+            return True
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Basic "):
+            return False
+        try:
+            decoded = base64.b64decode(auth[6:]).decode("utf-8")
+            _, pwd = decoded.split(":", 1)
+            return pwd == AUTH_PASSWORD
+        except Exception:
+            return False
+
+    def _require_auth(self) -> bool:
+        if not self._check_auth():
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Job Application AI"')
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", "12")
+            self.end_headers()
+            self.wfile.write(b"Unauthorized")
+            return False
+        return True
+
     def do_GET(self) -> None:
+        if not self._require_auth():
+            return
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/":
             self.html(INDEX_HTML)
+        elif parsed.path == "/swipe":
+            self.html(SWIPE_HTML)
+        elif parsed.path == "/manifest.json":
+            encoded = json.dumps(PWA_MANIFEST, indent=2).encode("utf-8")
+            self.send_response(200)
+            self.send_header("content-type", "application/manifest+json")
+            self.send_header("content-length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
         elif parsed.path == "/api/state":
             self.json(get_state())
+        elif parsed.path == "/api/swipe/jobs":
+            self.json({"ok": True, "jobs": get_swipe_jobs()})
         elif parsed.path == "/api/open-searches":
             self.json(search_links())
         elif parsed.path == "/api/session-memory":
@@ -7037,6 +7458,8 @@ class AppHandler(BaseHTTPRequestHandler):
             self.error(404, "Not found")
 
     def do_POST(self) -> None:
+        if not self._require_auth():
+            return
         parsed = urllib.parse.urlparse(self.path)
         try:
             data = self.read_json()
@@ -7162,10 +7585,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 with connect() as conn:
                     job_id = int(data.get("id"))
                     status = str(data.get("status", "new"))
-                    conn.execute(
-                        "update jobs set status=?, updated_at=? where id=?",
-                        (status, now_iso(), job_id),
-                    )
+                    reject_reason = str(data.get("reject_reason", ""))
+                    if reject_reason and status == "rejected":
+                        conn.execute(
+                            "update jobs set status=?, reject_reason=?, updated_at=? where id=?",
+                            (status, reject_reason, now_iso(), job_id),
+                        )
+                    else:
+                        conn.execute(
+                            "update jobs set status=?, updated_at=? where id=?",
+                            (status, now_iso(), job_id),
+                        )
                     if status == "applied":
                         app_id = ensure_application(conn, job_id)
                         app_row = conn.execute("select * from applications where id=?", (app_id,)).fetchone()
@@ -7736,6 +8166,647 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {fmt % args}")
+
+
+PWA_MANIFEST: dict[str, Any] = {
+    "name": "Job Swipe",
+    "short_name": "JobSwipe",
+    "description": "Swipe through jobs, like Tinder",
+    "start_url": "/swipe",
+    "display": "standalone",
+    "background_color": "#0A0A0A",
+    "theme_color": "#0A0A0A",
+    "orientation": "portrait",
+    "icons": [
+        {"src": "https://api.dicebear.com/8.x/initials/svg?seed=JS&backgroundColor=6366f1", "sizes": "192x192", "type": "image/svg+xml"},
+        {"src": "https://api.dicebear.com/8.x/initials/svg?seed=JS&backgroundColor=6366f1", "sizes": "512x512", "type": "image/svg+xml"},
+    ],
+}
+
+
+def get_swipe_jobs() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            select id, title, company, location, url, source, description,
+                   score, score_reasons, too_senior, reject_reason, created_at
+            from jobs
+            where status in ('new', 'shortlisted')
+              and too_senior = 0
+              and reject_reason = ''
+            order by score desc, created_at desc
+            limit 80
+            """
+        ).fetchall()
+    jobs = []
+    for row in rows:
+        d = dict(row)
+        desc = str(d.get("description") or "")
+        d["description_snippet"] = desc[:400].strip()
+        d["score"] = int(d.get("score") or 0)
+        jobs.append(d)
+    return jobs
+
+
+SWIPE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0A0A0A">
+<link rel="manifest" href="/manifest.json">
+<title>Job Swipe</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --like: #22c55e;
+    --nope: #ef4444;
+    --bg: #0A0A0A;
+    --card: #ffffff;
+    --text: #111827;
+    --muted: #6b7280;
+    --border: #f3f4f6;
+    --accent: #6366f1;
+  }
+  html, body {
+    height: 100%; width: 100%;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+    position: relative;
+  }
+  /* Header */
+  #header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 8px;
+    flex-shrink: 0;
+  }
+  #header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.5px;
+  }
+  #counter {
+    font-size: 13px;
+    color: #6b7280;
+    background: #1a1a1a;
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+  /* Card stack area */
+  #stack-area {
+    flex: 1;
+    position: relative;
+    padding: 8px 16px 0;
+    overflow: hidden;
+  }
+  /* Individual card */
+  .job-card {
+    position: absolute;
+    inset: 0;
+    margin: 8px 0;
+    background: var(--card);
+    border-radius: 24px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    will-change: transform;
+    transition: none;
+  }
+  .job-card.snap-back {
+    transition: transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+  .job-card.fly-left {
+    transition: transform 0.38s ease-in, opacity 0.38s ease-in;
+    transform: translateX(-130vw) rotate(-20deg) !important;
+    opacity: 0;
+  }
+  .job-card.fly-right {
+    transition: transform 0.38s ease-in, opacity 0.38s ease-in;
+    transform: translateX(130vw) rotate(20deg) !important;
+    opacity: 0;
+  }
+  /* Card behind (scale down) */
+  .job-card.behind-1 {
+    transform: scale(0.95) translateY(12px);
+    transition: transform 0.3s ease;
+  }
+  .job-card.behind-2 {
+    transform: scale(0.90) translateY(24px);
+    transition: transform 0.3s ease;
+  }
+  /* Card header */
+  .card-top {
+    padding: 20px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .company-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .company-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .company-meta {
+    flex: 1;
+    min-width: 0;
+  }
+  .company-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .source-badge {
+    font-size: 11px;
+    color: #9ca3af;
+  }
+  .job-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.25;
+    margin-bottom: 10px;
+  }
+  .tags-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tag {
+    font-size: 12px;
+    font-weight: 500;
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: #f3f4f6;
+    color: #374151;
+  }
+  .tag.remote { background: #d1fae5; color: #065f46; }
+  .tag.hybrid { background: #dbeafe; color: #1e40af; }
+  .tag.onsite { background: #fef3c7; color: #92400e; }
+  .tag.score-high { background: #d1fae5; color: #065f46; }
+  .tag.score-mid { background: #fef9c3; color: #713f12; }
+  /* Card body (description) */
+  .card-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 20px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .card-body p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #374151;
+    white-space: pre-line;
+  }
+  /* Swipe indicators */
+  .indicator {
+    position: absolute;
+    top: 28px;
+    font-size: 28px;
+    font-weight: 900;
+    padding: 6px 14px;
+    border-radius: 10px;
+    border-width: 4px;
+    border-style: solid;
+    opacity: 0;
+    transition: opacity 0.1s;
+    pointer-events: none;
+    letter-spacing: 1px;
+    z-index: 10;
+    transform: rotate(-15deg);
+  }
+  .indicator.like {
+    left: 20px;
+    color: var(--like);
+    border-color: var(--like);
+    transform: rotate(-15deg);
+  }
+  .indicator.nope {
+    right: 20px;
+    color: var(--nope);
+    border-color: var(--nope);
+    transform: rotate(15deg);
+  }
+  /* Bottom action buttons */
+  #actions {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    padding: 16px 20px 32px;
+    flex-shrink: 0;
+  }
+  .action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+    border-radius: 50%;
+    transition: transform 0.15s, box-shadow 0.15s;
+    flex-shrink: 0;
+  }
+  .action-btn:active { transform: scale(0.9); }
+  .btn-nope {
+    width: 60px; height: 60px;
+    background: #fff;
+    box-shadow: 0 4px 20px rgba(239,68,68,0.3);
+    font-size: 24px;
+  }
+  .btn-open {
+    width: 48px; height: 48px;
+    background: #1a1a1a;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    font-size: 18px;
+  }
+  .btn-like {
+    width: 60px; height: 60px;
+    background: #fff;
+    box-shadow: 0 4px 20px rgba(34,197,94,0.3);
+    font-size: 24px;
+  }
+  /* Empty / loading state */
+  #empty-state {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 16px;
+    color: #6b7280;
+    text-align: center;
+    padding: 40px;
+  }
+  #empty-state .empty-icon { font-size: 64px; }
+  #empty-state h2 { color: #fff; font-size: 22px; font-weight: 700; }
+  #empty-state p { font-size: 15px; line-height: 1.5; }
+  #empty-state button {
+    margin-top: 8px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 12px 28px;
+    border-radius: 40px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    color: #6b7280;
+  }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid #333;
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* Toast notification */
+  #toast {
+    position: fixed;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: #1a1a1a;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 40px;
+    font-size: 14px;
+    font-weight: 500;
+    transition: transform 0.3s ease;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 100;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  /* Liked queue link */
+  #liked-bar {
+    display: none;
+    background: #16a34a;
+    color: #fff;
+    text-align: center;
+    padding: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+  #liked-bar.show { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <h1>Job Swipe</h1>
+    <span id="counter">Loading...</span>
+  </div>
+  <a id="liked-bar" href="/" target="_blank">View liked jobs in desktop app ↗</a>
+  <div id="stack-area">
+    <div id="loading-state">
+      <div class="spinner"></div>
+      <span>Finding jobs...</span>
+    </div>
+    <div id="empty-state">
+      <div class="empty-icon">🎉</div>
+      <h2>You're all caught up!</h2>
+      <p>No more jobs to review right now.<br>Run your sources to discover more.</p>
+      <button onclick="location.reload()">Refresh</button>
+    </div>
+  </div>
+  <div id="actions" style="display:none">
+    <button class="action-btn btn-nope" onclick="swipeAction('nope')" title="Not interested">✕</button>
+    <button class="action-btn btn-open" onclick="openJob()" title="Open job listing">↗</button>
+    <button class="action-btn btn-like" onclick="swipeAction('like')" title="Shortlist">♥</button>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+let jobs = [];
+let currentIndex = 0;
+let likedCount = 0;
+let isDragging = false;
+let startX = 0, startY = 0, lastX = 0, lastY = 0;
+let cardEl = null;
+
+const stackArea = document.getElementById('stack-area');
+const actions = document.getElementById('actions');
+const counter = document.getElementById('counter');
+const emptyState = document.getElementById('empty-state');
+const loadingState = document.getElementById('loading-state');
+const likedBar = document.getElementById('liked-bar');
+
+async function loadJobs() {
+  try {
+    const res = await fetch('/api/swipe/jobs');
+    const data = await res.json();
+    jobs = data.jobs || [];
+    currentIndex = 0;
+    loadingState.style.display = 'none';
+    renderStack();
+  } catch (e) {
+    loadingState.innerHTML = '<p style="color:#ef4444">Failed to load jobs. Is the server running?</p>';
+  }
+}
+
+function getRemoteTag(job) {
+  const loc = (job.location || '').toLowerCase();
+  const desc = (job.description_snippet || '').toLowerCase();
+  if (loc.includes('remote') || desc.includes('fully remote') || desc.includes('100% remote')) return 'remote';
+  if (loc.includes('hybrid') || desc.includes('hybrid')) return 'hybrid';
+  return 'onsite';
+}
+
+function scoreTag(score) {
+  if (score >= 70) return 'score-high';
+  if (score >= 40) return 'score-mid';
+  return '';
+}
+
+function companyInitial(company) {
+  return (company || '?').trim().charAt(0).toUpperCase();
+}
+
+function makeCard(job, zIndex) {
+  const card = document.createElement('div');
+  card.className = 'job-card';
+  card.style.zIndex = zIndex;
+
+  const remote = getRemoteTag(job);
+  const sc = scoreTag(job.score);
+  const loc = job.location || 'Location unknown';
+  const snippet = (job.description_snippet || '').replace(/\\n{3,}/g, '\\n\\n').trim();
+
+  card.innerHTML = `
+    <div class="indicator like">LIKE</div>
+    <div class="indicator nope">NOPE</div>
+    <div class="card-top">
+      <div class="company-row">
+        <div class="company-avatar">${companyInitial(job.company)}</div>
+        <div class="company-meta">
+          <div class="company-name">${esc(job.company)}</div>
+          <div class="source-badge">${esc(job.source || '')}</div>
+        </div>
+      </div>
+      <div class="job-title">${esc(job.title)}</div>
+      <div class="tags-row">
+        <span class="tag ${remote}">${remote.charAt(0).toUpperCase() + remote.slice(1)}</span>
+        ${loc !== 'Location unknown' ? `<span class="tag">📍 ${esc(loc)}</span>` : ''}
+        ${sc ? `<span class="tag ${sc}">Score ${job.score}</span>` : ''}
+      </div>
+    </div>
+    <div class="card-body">
+      <p>${esc(snippet) || '<span style="color:#9ca3af">No description available.</span>'}</p>
+    </div>
+  `;
+  return card;
+}
+
+function esc(str) {
+  return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderStack() {
+  // Remove existing cards
+  stackArea.querySelectorAll('.job-card').forEach(c => c.remove());
+
+  const remaining = jobs.slice(currentIndex);
+
+  if (remaining.length === 0) {
+    emptyState.style.display = 'flex';
+    actions.style.display = 'none';
+    counter.textContent = 'All done';
+    return;
+  }
+
+  counter.textContent = `${remaining.length} left`;
+  actions.style.display = 'flex';
+  emptyState.style.display = 'none';
+
+  // Render top 3 cards (reversed so top card is on top)
+  const visible = remaining.slice(0, 3).reverse();
+  visible.forEach((job, i) => {
+    const realI = visible.length - 1 - i; // 0 = top card
+    const card = makeCard(job, 10 + i);
+    if (realI === 1) card.classList.add('behind-1');
+    if (realI === 2) card.classList.add('behind-2');
+    stackArea.appendChild(card);
+    if (realI === 0) {
+      attachDrag(card);
+      cardEl = card;
+    }
+  });
+}
+
+function attachDrag(card) {
+  let ox = 0, oy = 0;
+
+  function onStart(x, y) {
+    isDragging = true;
+    startX = x; startY = y; lastX = x; lastY = y;
+    card.classList.remove('snap-back');
+  }
+
+  function onMove(x, y) {
+    if (!isDragging) return;
+    lastX = x; lastY = y;
+    ox = x - startX;
+    oy = y - startY;
+    const rot = ox * 0.08;
+    card.style.transform = `translate(${ox}px, ${oy}px) rotate(${rot}deg)`;
+
+    const likeEl = card.querySelector('.indicator.like');
+    const nopeEl = card.querySelector('.indicator.nope');
+    if (ox > 30) {
+      likeEl.style.opacity = Math.min(1, (ox - 30) / 80);
+      nopeEl.style.opacity = 0;
+    } else if (ox < -30) {
+      nopeEl.style.opacity = Math.min(1, (-ox - 30) / 80);
+      likeEl.style.opacity = 0;
+    } else {
+      likeEl.style.opacity = 0;
+      nopeEl.style.opacity = 0;
+    }
+  }
+
+  function onEnd() {
+    if (!isDragging) return;
+    isDragging = false;
+    const dx = lastX - startX;
+    if (dx > 100) {
+      doLike(card);
+    } else if (dx < -100) {
+      doNope(card);
+    } else {
+      card.classList.add('snap-back');
+      card.style.transform = '';
+      card.querySelector('.indicator.like').style.opacity = 0;
+      card.querySelector('.indicator.nope').style.opacity = 0;
+    }
+  }
+
+  card.addEventListener('touchstart', e => {
+    if (e.target.closest('.card-body')) return; // allow scroll in body
+    onStart(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  card.addEventListener('touchmove', e => {
+    if (!isDragging) return;
+    e.preventDefault();
+    onMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: false });
+  card.addEventListener('touchend', () => onEnd());
+
+  // Mouse support for desktop testing
+  card.addEventListener('mousedown', e => {
+    if (e.target.closest('.card-body')) return;
+    onStart(e.clientX, e.clientY);
+    const move = ev => onMove(ev.clientX, ev.clientY);
+    const up = () => { onEnd(); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  });
+}
+
+async function doLike(card) {
+  const job = jobs[currentIndex];
+  card.classList.add('fly-right');
+  await api('/api/jobs/status', { id: job.id, status: 'shortlisted' });
+  likedCount++;
+  likedBar.classList.add('show');
+  likedBar.textContent = `♥ ${likedCount} liked — tap to review & apply ↗`;
+  toast('♥ Shortlisted!');
+  advance();
+}
+
+async function doNope(card) {
+  const job = jobs[currentIndex];
+  card.classList.add('fly-left');
+  await api('/api/jobs/status', { id: job.id, status: 'rejected', reject_reason: 'swiped left' });
+  toast('Passed');
+  advance();
+}
+
+function advance() {
+  currentIndex++;
+  setTimeout(() => renderStack(), 380);
+}
+
+function openJob() {
+  if (currentIndex >= jobs.length) return;
+  const job = jobs[currentIndex];
+  if (job.url) window.open(job.url, '_blank');
+  else toast('No URL for this job');
+}
+
+function swipeAction(dir) {
+  if (!cardEl || currentIndex >= jobs.length) return;
+  if (dir === 'like') doLike(cardEl);
+  else doNope(cardEl);
+}
+
+async function api(path, body) {
+  try {
+    await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) { /* fire and forget */ }
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+loadJobs();
+</script>
+</body>
+</html>"""
 
 
 def get_state() -> dict[str, Any]:
@@ -8613,18 +9684,28 @@ INDEX_HTML = r"""<!doctype html>
               <div>
                 <label>Type</label>
                 <select id="source_type">
-                  <option value="greenhouse">Greenhouse</option>
-                  <option value="lever">Lever</option>
-                  <option value="ashby">Ashby</option>
-                  <option value="smartrecruiters">SmartRecruiters</option>
-                  <option value="recruitee">Recruitee</option>
-                  <option value="remotive">Remotive remote jobs</option>
-                  <option value="remoteok">Remote OK remote jobs</option>
-                  <option value="arbeitnow">Arbeitnow Europe remote jobs</option>
-                  <option value="careers">Public careers page</option>
-                  <option value="workable">Workable careers page</option>
-                  <option value="teamtailor">Teamtailor careers page</option>
-                  <option value="url">Direct URL</option>
+                  <optgroup label="ATS boards">
+                    <option value="greenhouse">Greenhouse</option>
+                    <option value="lever">Lever</option>
+                    <option value="ashby">Ashby</option>
+                    <option value="smartrecruiters">SmartRecruiters</option>
+                    <option value="recruitee">Recruitee</option>
+                    <option value="workable">Workable</option>
+                    <option value="teamtailor">Teamtailor</option>
+                  </optgroup>
+                  <optgroup label="Job board feeds">
+                    <option value="jobicy_rss">Jobicy RSS (remote jobs, works great)</option>
+                    <option value="remotive">Remotive remote jobs</option>
+                    <option value="arbeitnow">Arbeitnow Europe remote</option>
+                    <option value="indeed_rss">Indeed RSS (token = location)</option>
+                    <option value="weworkremotely_rss">WeWorkRemotely RSS</option>
+                    <option value="adzuna">Adzuna SA (needs API key in .env)</option>
+                    <option value="remoteok">Remote OK remote jobs</option>
+                  </optgroup>
+                  <optgroup label="Careers pages">
+                    <option value="careers">Public careers page</option>
+                    <option value="url">Direct URL</option>
+                  </optgroup>
                 </select>
               </div>
             </div>
@@ -8714,18 +9795,19 @@ INDEX_HTML = r"""<!doctype html>
                 <label>Source type</label>
                 <select id="target_source_type">
                   <option value="">Auto/direct URL</option>
-                  <option value="greenhouse">Greenhouse</option>
-                  <option value="lever">Lever</option>
-                  <option value="ashby">Ashby</option>
-                  <option value="smartrecruiters">SmartRecruiters</option>
-                  <option value="recruitee">Recruitee</option>
-                  <option value="remotive">Remotive remote jobs</option>
-                  <option value="remoteok">Remote OK remote jobs</option>
-                  <option value="arbeitnow">Arbeitnow Europe remote jobs</option>
-                  <option value="careers">Public careers page</option>
-                  <option value="workable">Workable careers page</option>
-                  <option value="teamtailor">Teamtailor careers page</option>
-                  <option value="url">Direct URL</option>
+                  <optgroup label="ATS boards">
+                    <option value="greenhouse">Greenhouse</option>
+                    <option value="lever">Lever</option>
+                    <option value="ashby">Ashby</option>
+                    <option value="smartrecruiters">SmartRecruiters</option>
+                    <option value="recruitee">Recruitee</option>
+                    <option value="workable">Workable</option>
+                    <option value="teamtailor">Teamtailor</option>
+                  </optgroup>
+                  <optgroup label="Careers pages">
+                    <option value="careers">Public careers page</option>
+                    <option value="url">Direct URL</option>
+                  </optgroup>
                 </select>
               </div>
               <div><label>ATS token / source token</label><input id="target_source_token" placeholder="company-name or board token"></div>
