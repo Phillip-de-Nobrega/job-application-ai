@@ -8200,7 +8200,7 @@ def get_swipe_jobs() -> list[dict[str, Any]]:
     for row in rows:
         d = dict(row)
         desc = str(d.get("description") or "")
-        d["description_snippet"] = desc[:400].strip()
+        d["description_snippet"] = desc[:2500].strip()
         d["score"] = int(d.get("score") or 0)
         jobs.append(d)
     return jobs

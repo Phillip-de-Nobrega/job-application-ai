@@ -1,6 +1,6 @@
 # Session Memory
 
-Last updated: 2026-05-08
+Last updated: 2026-05-13
 
 ## Project Goal
 
@@ -56,103 +56,87 @@ The system may draft and prepare, but Phillip must review and manually submit or
 - Sensitive ATSs should be treated as manual-first and paced conservatively
 - Never invent work authorization, salary, experience, or legal/compliance answers
 
-## Current Product Shape
+## Current Product Shape (as of 2026-05-13)
 
-The app has been refactored into a tool-first workspace inspired by AIApply's structure, while staying local and review-first.
+The app has been rebuilt into a **Tinder-style swipe PWA**. The entire frontend is now the swipe UI — no complex desktop interface.
 
-### Current top-level sections
+### How the app works now
 
-- `Home`
-- `Auto Apply Queue`
-- `Resume Lab`
-- `ATS Scanner`
-- `Interview Prep`
-- `Profile`
-- `Discover`
-- `Targets`
-- `Jobs`
-- `Applications`
-- `Outreach`
-- `Ops`
-- `Analytics`
-- `Email`
-- `Session`
+- `/` and `/swipe` both serve the swipe card UI (PWA, add to iPhone home screen)
+- Cards show: gradient company avatar, job title, company, location chip, remote/hybrid/onsite chip, score chip, scrollable description (up to 2500 chars)
+- Swipe right → shortlists the job + shows "Apply Now / Later" bottom sheet
+- Swipe left → permanently rejects the job (never resurfaces)
+- "Apply Now" → opens job URL directly in browser
+- "Later" → saves to queue for later
+- The discovery scheduler runs automatically in the background
+- `/manifest.json` — PWA manifest for "Add to Home Screen" on iPhone
+
+### Access
+
+- Phone accesses the app via local network (Phillip shares the Mac's IP link to his phone)
+- Mac must be on and running `python3 app.py`
+- PWA added to iPhone home screen — looks and feels like a native app
+
+### UI features
+
+- Dark background (#0D0D0D), white cards with deep shadows
+- Gradient avatar per company (deterministic colour by name)
+- Score stripe across card top (green/amber/purple)
+- LIKE/NOPE stamps appear progressively as you drag
+- Springy snap-back animation on release
+- Apply sheet with frosted backdrop after liking
+- Description scrollable inside card without triggering swipe
+- Action buttons: ✕ (red glow), ↗ (open URL), ♥ (green glow)
 
 ## Implemented System Capabilities
 
 ### Discovery and sourcing
 
 - Public/compliant job discovery from:
-  - Greenhouse
-  - Lever
-  - Ashby
-  - SmartRecruiters
-  - Recruitee
-  - Direct URL
-  - Remotive public API
-  - Remote OK public API (disabled — requires account to apply)
-  - Arbeitnow public API
-  - Workable public
-  - Teamtailor public
-  - **Jobicy RSS** — verified working, no API key needed (`jobicy_rss` source type)
-  - **Indeed RSS** — implemented, currently blocked by Indeed (returns 0 gracefully)
-  - **WeWorkRemotely RSS** — implemented, currently blocked (returns 0 gracefully)
-  - **Adzuna SA API** — implemented, needs `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` in `.env` (free tier at developer.adzuna.com)
-- Discovery defaults to a graduate-marketing query
-- Strict upstream filtering — non-marketing, medical, and senior titles filtered before queue
-
-### Rejected jobs — never resurface (fixed 2026-05-08)
-
-- `upsert_job` now checks: if existing job by URL has `status='rejected'` → skip update entirely
-- Before inserting a new job, checks `lower(title) + lower(company)` fingerprint — if a matching rejected job exists under a different URL/source, the insert is skipped
-- This means: saying "No thanks" to a job permanently suppresses it, even if the same role comes in again from a different source
-
-### New starter sources added (2026-05-08)
-
-Go to **Discover → Add starter job sources** to seed them:
-- Jobicy marketing RSS + Jobicy copywriting RSS
-- CareerJunction all marketing (SA)
-- PNet Cape Town marketing
-- Careers24 marketing Cape Town
-- WorkAfrica marketing Cape Town
-- Takealot, Superbalist, Yoco, Peach Payments careers pages
-- Buffer (Greenhouse), Mailchimp (Greenhouse), Hootsuite (Greenhouse), Sprout Social (Lever), Later (Lever), Canva (Greenhouse), Notion (Greenhouse)
-
-### Source type dropdown reorganised
-
-- **ATS boards**: Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, Teamtailor
-- **Job board feeds**: Jobicy RSS, Remotive, Arbeitnow, Indeed RSS, WeWorkRemotely RSS, Adzuna SA, Remote OK
-- **Careers pages**: Public careers page, Direct URL
+  - Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, Teamtailor
+  - Jobicy RSS (verified working), Indeed RSS (blocked), WeWorkRemotely RSS (blocked)
+  - Remotive, Arbeitnow, Remote OK (disabled)
+  - Adzuna SA API (implemented, needs API keys in `.env`)
+  - Direct URL, Public careers page
+- Strict upstream filtering — non-marketing, medical, and senior titles filtered
+- Rejected jobs permanently suppressed — never resurface from any source
 
 ### Queue and application workflow
 
-- Application drafts tracked in SQLite with persistent `queue_state`: review / approved / hold
-- Queue quick actions: Approve, Hold, Review, No thanks
-- Queue batch actions: Approve safe roles, Hold blocked ATS, Reset queue to review
-- `No thanks` stores `reject_reason` + `reject_notes`, reinforces learning
+- Swipe right → status = 'shortlisted'
+- Swipe left → status = 'rejected' with reason 'swiped left'
+- Application drafts tracked in SQLite
+- Follow-up emails generated at 7 days, manually sent
 
-### Resume Lab, ATS Scanner, Form prep, Email/follow-up
+## Deployment Config
 
-(Unchanged from previous session — see prior entries)
+- `railway.toml` — Railway deployment config (start command: `python app.py`)
+- `requirements.txt` — standard library only, no pip deps
+- `.env.example` — template for environment variables
+- `HOST` defaults to `0.0.0.0` (env var override available)
+- `PORT` reads from `PORT` env var (Railway) or `JOB_AI_PORT` (local)
+- `JOB_AI_PASSWORD` env var adds HTTP Basic Auth for online deployment
+- `JOB_AI_CV_PATH` env var makes CV path configurable
 
 ## Current Operational State
 
-As of 2026-05-08:
+As of 2026-05-13:
 - Server runs on `http://127.0.0.1:8765`
-- 42 starter sources seeded (up from 35)
-- Jobicy RSS live-tested: found 2 matching marketing jobs on first run
-- Rejection fix live-tested: re-running a source after rejecting a job leaves status unchanged
+- 80 jobs in swipe queue (from last check)
+- Swipe UI is the only frontend — `/` serves the swipe page
+- PWA installable on iPhone via Safari → Share → Add to Home Screen
 
 ## Known Gaps / Next Recommended Work
 
-1. Get Adzuna API keys (free at developer.adzuna.com) and add to `.env` as `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` — this will unlock SA-specific job discovery with real Cape Town listings
-2. Run all sources and review the new Jobicy + SA careers page results
-3. Review remaining active drafts and reject weak ones with real reasons
-4. Keep improving platform adapters based on real failures (SmartRecruiters, custom forms)
-5. Add stronger learning from `No thanks` reasons into future sourcing
+1. **Better job discovery** — current sources not finding the best Cape Town / remote marketing roles for a grad. Phillip mentioned this explicitly.
+2. **Get Adzuna API keys** (free at developer.adzuna.com) — add `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` to `.env` for SA-specific Cape Town listings
+3. **Source quality audit** — 27 sources had errors on last run (404s, 403s). Remove dead ones, add better ones.
+4. **Smarter scoring** — score should weight Cape Town location and junior/grad titles more heavily
+5. **Platform adapters** — SmartRecruiters, custom forms still need improvement
+6. **Learning from swipe lefts** — rejection reasons from swiping should feed back into sourcing
 
 ## Git / State Handoff
 
-- Latest confirmed commit before this session's changes: `f8dd848` `Update session memory — end of 2026-05-07 session 2`
-- Changes in this session are in-memory only (app.py modified, server running with changes)
-- Commit these changes before next session
+- Latest commit: `2a312ad` — Complete swipe UI redesign
+- All changes committed and pushed to GitHub
+- Server was running at end of session — may need restart next session
