@@ -7435,9 +7435,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if not self._require_auth():
             return
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/":
-            self.html(INDEX_HTML)
-        elif parsed.path == "/swipe":
+        if parsed.path == "/" or parsed.path == "/swipe":
             self.html(SWIPE_HTML)
         elif parsed.path == "/manifest.json":
             encoded = json.dumps(PWA_MANIFEST, indent=2).encode("utf-8")
