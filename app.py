@@ -8206,663 +8206,492 @@ def get_swipe_jobs() -> list[dict[str, Any]]:
     return jobs
 
 
-SWIPE_HTML = """<!DOCTYPE html>
+SWIPE_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#0A0A0A">
+<meta name="theme-color" content="#0D0D0D">
 <link rel="manifest" href="/manifest.json">
-<title>Job Swipe</title>
+<title>JobSwipe</title>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --like: #22c55e;
-    --nope: #ef4444;
-    --bg: #0A0A0A;
-    --card: #ffffff;
-    --text: #111827;
-    --muted: #6b7280;
-    --border: #f3f4f6;
-    --accent: #6366f1;
-  }
-  html, body {
-    height: 100%; width: 100%;
-    background: var(--bg);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    overflow: hidden;
-    touch-action: none;
-  }
-  #app {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    max-width: 480px;
-    margin: 0 auto;
-    position: relative;
-  }
-  /* Header */
-  #header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px 8px;
-    flex-shrink: 0;
-  }
-  #header h1 {
-    font-size: 22px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.5px;
-  }
-  #counter {
-    font-size: 13px;
-    color: #6b7280;
-    background: #1a1a1a;
-    padding: 4px 10px;
-    border-radius: 20px;
-  }
-  /* Card stack area */
-  #stack-area {
-    flex: 1;
-    position: relative;
-    padding: 8px 16px 0;
-    overflow: hidden;
-  }
-  /* Individual card */
-  .job-card {
-    position: absolute;
-    inset: 0;
-    margin: 8px 0;
-    background: var(--card);
-    border-radius: 24px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    user-select: none;
-    will-change: transform;
-    transition: none;
-  }
-  .job-card.snap-back {
-    transition: transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  }
-  .job-card.fly-left {
-    transition: transform 0.38s ease-in, opacity 0.38s ease-in;
-    transform: translateX(-130vw) rotate(-20deg) !important;
-    opacity: 0;
-  }
-  .job-card.fly-right {
-    transition: transform 0.38s ease-in, opacity 0.38s ease-in;
-    transform: translateX(130vw) rotate(20deg) !important;
-    opacity: 0;
-  }
-  /* Card behind (scale down) */
-  .job-card.behind-1 {
-    transform: scale(0.95) translateY(12px);
-    transition: transform 0.3s ease;
-  }
-  .job-card.behind-2 {
-    transform: scale(0.90) translateY(24px);
-    transition: transform 0.3s ease;
-  }
-  /* Card header */
-  .card-top {
-    padding: 20px 20px 12px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .company-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 10px;
-  }
-  .company-avatar {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    font-weight: 700;
-    color: #fff;
-    flex-shrink: 0;
-  }
-  .company-meta {
-    flex: 1;
-    min-width: 0;
-  }
-  .company-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .source-badge {
-    font-size: 11px;
-    color: #9ca3af;
-  }
-  .job-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--text);
-    line-height: 1.25;
-    margin-bottom: 10px;
-  }
-  .tags-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .tag {
-    font-size: 12px;
-    font-weight: 500;
-    padding: 3px 9px;
-    border-radius: 20px;
-    background: #f3f4f6;
-    color: #374151;
-  }
-  .tag.remote { background: #d1fae5; color: #065f46; }
-  .tag.hybrid { background: #dbeafe; color: #1e40af; }
-  .tag.onsite { background: #fef3c7; color: #92400e; }
-  .tag.score-high { background: #d1fae5; color: #065f46; }
-  .tag.score-mid { background: #fef9c3; color: #713f12; }
-  /* Card body (description) */
-  .card-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 14px 20px;
-    -webkit-overflow-scrolling: touch;
-  }
-  .card-body p {
-    font-size: 14px;
-    line-height: 1.6;
-    color: #374151;
-    white-space: pre-line;
-  }
-  /* Swipe indicators */
-  .indicator {
-    position: absolute;
-    top: 28px;
-    font-size: 28px;
-    font-weight: 900;
-    padding: 6px 14px;
-    border-radius: 10px;
-    border-width: 4px;
-    border-style: solid;
-    opacity: 0;
-    transition: opacity 0.1s;
-    pointer-events: none;
-    letter-spacing: 1px;
-    z-index: 10;
-    transform: rotate(-15deg);
-  }
-  .indicator.like {
-    left: 20px;
-    color: var(--like);
-    border-color: var(--like);
-    transform: rotate(-15deg);
-  }
-  .indicator.nope {
-    right: 20px;
-    color: var(--nope);
-    border-color: var(--nope);
-    transform: rotate(15deg);
-  }
-  /* Bottom action buttons */
-  #actions {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 20px;
-    padding: 16px 20px 32px;
-    flex-shrink: 0;
-  }
-  .action-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    cursor: pointer;
-    border-radius: 50%;
-    transition: transform 0.15s, box-shadow 0.15s;
-    flex-shrink: 0;
-  }
-  .action-btn:active { transform: scale(0.9); }
-  .btn-nope {
-    width: 60px; height: 60px;
-    background: #fff;
-    box-shadow: 0 4px 20px rgba(239,68,68,0.3);
-    font-size: 24px;
-  }
-  .btn-open {
-    width: 48px; height: 48px;
-    background: #1a1a1a;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-    font-size: 18px;
-  }
-  .btn-like {
-    width: 60px; height: 60px;
-    background: #fff;
-    box-shadow: 0 4px 20px rgba(34,197,94,0.3);
-    font-size: 24px;
-  }
-  /* Empty / loading state */
-  #empty-state {
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    gap: 16px;
-    color: #6b7280;
-    text-align: center;
-    padding: 40px;
-  }
-  #empty-state .empty-icon { font-size: 64px; }
-  #empty-state h2 { color: #fff; font-size: 22px; font-weight: 700; }
-  #empty-state p { font-size: 15px; line-height: 1.5; }
-  #empty-state button {
-    margin-top: 8px;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    padding: 12px 28px;
-    border-radius: 40px;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  #loading-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    gap: 12px;
-    color: #6b7280;
-  }
-  .spinner {
-    width: 36px; height: 36px;
-    border: 3px solid #333;
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  /* Apply sheet */
-  .apply-sheet {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    background: #1c1c1e;
-    border-radius: 20px 20px 0 0;
-    padding: 12px 20px 48px;
-    transform: translateY(100%);
-    transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
-    z-index: 200;
-    box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
-  }
-  .apply-sheet.show { transform: translateY(0); }
-  .sheet-handle {
-    width: 36px; height: 4px;
-    background: #444; border-radius: 2px;
-    margin: 0 auto 16px;
-  }
-  .sheet-co { font-size: 12px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-  .sheet-ttl { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 20px; line-height: 1.3; }
-  .sheet-btns { display: flex; gap: 10px; }
-  .sheet-apply-btn {
-    flex: 1; background: var(--like); color: #fff;
-    border: none; padding: 14px; border-radius: 14px;
-    font-size: 16px; font-weight: 700; cursor: pointer;
-  }
-  .sheet-later-btn {
-    background: #2a2a2a; color: #aaa;
-    border: none; padding: 14px 20px; border-radius: 14px;
-    font-size: 15px; font-weight: 600; cursor: pointer;
-  }
-  /* Toast notification */
-  #toast {
-    position: fixed;
-    bottom: 110px;
-    left: 50%;
-    transform: translateX(-50%) translateY(80px);
-    background: #1a1a1a;
-    color: #fff;
-    padding: 10px 20px;
-    border-radius: 40px;
-    font-size: 14px;
-    font-weight: 500;
-    transition: transform 0.3s ease;
-    pointer-events: none;
-    white-space: nowrap;
-    z-index: 100;
-  }
-  #toast.show { transform: translateX(-50%) translateY(0); }
-  /* Liked queue link */
-  #liked-bar {
-    display: none;
-    background: #16a34a;
-    color: #fff;
-    text-align: center;
-    padding: 10px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    text-decoration: none;
-    flex-shrink: 0;
-  }
-  #liked-bar.show { display: block; }
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0D0D0D;--like:#22c55e;--nope:#ef4444;--accent:#6366f1;
+  --card:#FFFFFF;--text:#111827;--mid:#4B5563;--light:#9CA3AF;--border:#F3F4F6;
+}
+html,body{
+  height:100%;width:100%;background:var(--bg);overflow:hidden;touch-action:none;
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+/* ── Shell ── */
+#app{
+  height:100%;max-width:430px;margin:0 auto;
+  display:flex;flex-direction:column;
+}
+/* ── Header ── */
+#hdr{
+  padding:calc(env(safe-area-inset-top,0px) + 14px) 22px 10px;
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+}
+.logo{font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.8px}
+.logo em{color:var(--accent);font-style:normal}
+.pill{
+  display:flex;align-items:center;gap:7px;
+  background:#1A1A1A;border:1px solid #262626;
+  border-radius:40px;padding:6px 14px 6px 10px;
+}
+.pill-dot{
+  width:8px;height:8px;border-radius:50%;background:var(--like);
+  box-shadow:0 0 8px rgba(34,197,94,.6);
+}
+.pill-txt{font-size:13px;font-weight:600;color:#bbb}
+/* ── Stack ── */
+#stack{
+  flex:1;position:relative;
+  padding:6px 14px 0;overflow:hidden;
+  min-height:0;
+}
+/* ── Cards ── */
+.jcard{
+  position:absolute;inset:0;margin-bottom:6px;
+  background:var(--card);border-radius:28px;
+  box-shadow:0 24px 64px rgba(0,0,0,.5),0 8px 24px rgba(0,0,0,.3);
+  overflow:hidden;display:flex;flex-direction:column;
+  will-change:transform;user-select:none;
+}
+.jcard.b1{transform:scale(.955) translateY(14px);transition:transform .3s ease}
+.jcard.b2{transform:scale(.91) translateY(28px);transition:transform .3s ease}
+.jcard.snapping{transition:transform .45s cubic-bezier(.175,.885,.32,1.275)}
+.jcard.fly-l{
+  transition:transform .4s cubic-bezier(.55,0,1,.45),opacity .4s ease;
+  transform:translateX(-130vw) rotate(-26deg) !important;opacity:0;
+}
+.jcard.fly-r{
+  transition:transform .4s cubic-bezier(.55,0,1,.45),opacity .4s ease;
+  transform:translateX(130vw) rotate(26deg) !important;opacity:0;
+}
+/* Score stripe */
+.sbar{height:4px;background:#F3F4F6;flex-shrink:0}
+.sbar-fill{height:100%;border-radius:0 3px 3px 0;transition:width .3s}
+/* Card header */
+.chdr{
+  padding:18px 20px 14px;
+  display:flex;align-items:center;gap:14px;flex-shrink:0;
+  border-bottom:1px solid var(--border);
+}
+.avatar{
+  width:54px;height:54px;border-radius:15px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:24px;font-weight:900;color:#fff;letter-spacing:-1px;
+}
+.cinfo{flex:1;min-width:0}
+.cname{
+  font-size:11px;font-weight:700;color:var(--mid);
+  text-transform:uppercase;letter-spacing:.6px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px;
+}
+.stag{
+  display:inline-flex;align-items:center;
+  font-size:11px;font-weight:600;color:var(--light);
+  background:#F9FAFB;border:1px solid #EDEDED;
+  border-radius:6px;padding:2px 8px;
+}
+/* Title */
+.ctitle{
+  padding:16px 20px 10px;flex-shrink:0;
+}
+.jtitle{
+  font-size:22px;font-weight:800;color:var(--text);
+  line-height:1.22;letter-spacing:-.5px;
+  display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden;
+}
+/* Chips */
+.chips{
+  padding:0 20px 12px;
+  display:flex;flex-wrap:wrap;gap:7px;flex-shrink:0;
+}
+.chip{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:5px 12px;border-radius:20px;
+  font-size:12px;font-weight:600;white-space:nowrap;
+}
+.cr{background:#DCFCE7;color:#15803D}
+.ch{background:#DBEAFE;color:#1D4ED8}
+.co{background:#FEF3C7;color:#B45309}
+.cl{background:#F3F4F6;color:#374151}
+.cs{background:#EEF2FF;color:#4338CA}
+/* Description */
+.cdesc{
+  flex:1;padding:0 20px 16px;overflow:hidden;
+  position:relative;min-height:0;
+}
+.cdesc-inner{
+  height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding-right:2px;
+}
+.cdesc-inner::-webkit-scrollbar{display:none}
+.cdesc-txt{
+  font-size:14px;line-height:1.78;color:#374151;
+  white-space:pre-line;word-break:break-word;
+}
+.cdesc::after{
+  content:'';position:absolute;bottom:16px;left:0;right:0;height:52px;
+  background:linear-gradient(transparent,#fff);pointer-events:none;
+}
+/* Stamps */
+.stamp{
+  position:absolute;padding:7px 13px;border-radius:9px;border:4px solid;
+  font-size:19px;font-weight:900;letter-spacing:2px;
+  opacity:0;z-index:10;pointer-events:none;text-transform:uppercase;
+}
+.sl{top:26px;left:20px;color:var(--like);border-color:var(--like);transform:rotate(-18deg)}
+.sn{top:26px;right:20px;color:var(--nope);border-color:var(--nope);transform:rotate(18deg)}
+/* Action bar */
+#actions{
+  flex-shrink:0;display:none;flex-direction:column;align-items:center;gap:0;
+  padding:14px 20px calc(18px + env(safe-area-inset-bottom,0px));
+  background:linear-gradient(transparent,var(--bg) 28%);
+}
+#actions.on{display:flex}
+.liked-bar{
+  display:none;align-items:center;justify-content:center;gap:8px;
+  background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.25);
+  border-radius:12px;padding:9px 20px;margin-bottom:14px;
+  font-size:13px;font-weight:600;color:var(--like);width:100%;
+}
+.liked-bar.on{display:flex}
+.abtns{display:flex;align-items:center;justify-content:center;gap:20px}
+.abtn{
+  border:none;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  transition:transform .15s cubic-bezier(.34,1.56,.64,1),box-shadow .15s;
+}
+.abtn:active{transform:scale(.86) !important}
+.nope-btn{
+  width:66px;height:66px;background:#fff;font-size:26px;
+  box-shadow:0 4px 22px rgba(239,68,68,.32),0 2px 8px rgba(0,0,0,.2);
+}
+.nope-btn:hover{transform:scale(1.08);box-shadow:0 6px 30px rgba(239,68,68,.45),0 2px 8px rgba(0,0,0,.2)}
+.open-btn{
+  width:50px;height:50px;background:#1E1E1E;font-size:18px;
+  box-shadow:0 4px 16px rgba(0,0,0,.5);color:#888;
+}
+.open-btn:hover{transform:scale(1.06)}
+.like-btn{
+  width:66px;height:66px;background:#fff;font-size:26px;
+  box-shadow:0 4px 22px rgba(34,197,94,.38),0 2px 8px rgba(0,0,0,.2);
+}
+.like-btn:hover{transform:scale(1.08);box-shadow:0 6px 30px rgba(34,197,94,.52),0 2px 8px rgba(0,0,0,.2)}
+/* Empty */
+#empty{display:none;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;text-align:center;padding:48px}
+#empty.on{display:flex}
+#empty .ei{font-size:68px}
+#empty h2{font-size:26px;font-weight:800;color:#fff;letter-spacing:-.5px}
+#empty p{font-size:15px;color:#555;line-height:1.65}
+#empty button{
+  margin-top:8px;background:var(--accent);color:#fff;border:none;
+  padding:14px 36px;border-radius:40px;font-size:15px;font-weight:700;cursor:pointer;
+  box-shadow:0 4px 22px rgba(99,102,241,.4);
+}
+/* Loading */
+#loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px}
+.spin{
+  width:42px;height:42px;border:3px solid #222;
+  border-top-color:var(--accent);border-radius:50%;
+  animation:rot .75s linear infinite;
+}
+@keyframes rot{to{transform:rotate(360deg)}}
+/* Sheet backdrop */
+.backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  opacity:0;transition:opacity .3s;pointer-events:none;z-index:190;
+}
+.backdrop.on{opacity:1;pointer-events:all}
+/* Apply sheet */
+.sheet{
+  position:fixed;bottom:0;left:0;right:0;max-width:430px;margin:0 auto;
+  background:#1C1C1E;border-radius:24px 24px 0 0;
+  padding:0 0 calc(28px + env(safe-area-inset-bottom,0px));
+  transform:translateY(100%);transition:transform .4s cubic-bezier(.32,.72,0,1);
+  z-index:200;box-shadow:0 -8px 64px rgba(0,0,0,.7);
+}
+.sheet.on{transform:translateY(0)}
+.sheet-grip{display:flex;justify-content:center;padding:12px 0 6px}
+.grip{width:40px;height:5px;background:#3A3A3C;border-radius:3px}
+.sheet-body{padding:10px 26px 0}
+.sheet-lbl{font-size:11px;font-weight:700;color:#8E8E93;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px}
+.sheet-co{font-size:14px;font-weight:600;color:rgba(235,235,245,.7);margin-bottom:3px}
+.sheet-ttl{font-size:21px;font-weight:800;color:#fff;letter-spacing:-.4px;line-height:1.28;margin-bottom:24px}
+.sheet-btns{display:flex;gap:12px}
+.s-apply{
+  flex:1;background:var(--like);color:#fff;border:none;
+  padding:15px 20px;border-radius:16px;font-size:16px;font-weight:700;cursor:pointer;
+  box-shadow:0 4px 22px rgba(34,197,94,.4);transition:transform .15s,box-shadow .15s;
+}
+.s-apply:active{transform:scale(.97);box-shadow:0 2px 12px rgba(34,197,94,.25)}
+.s-later{
+  background:#2C2C2E;color:#8E8E93;border:none;
+  padding:15px 20px;border-radius:16px;font-size:15px;font-weight:600;cursor:pointer;
+}
+.s-later:active{background:#3A3A3C}
+/* Toast */
+#toast{
+  position:fixed;bottom:124px;left:50%;
+  transform:translateX(-50%) translateY(16px);
+  background:#1C1C1E;color:#fff;padding:10px 22px;border-radius:40px;
+  font-size:14px;font-weight:600;opacity:0;
+  transition:opacity .2s,transform .2s;pointer-events:none;
+  white-space:nowrap;z-index:300;box-shadow:0 4px 24px rgba(0,0,0,.5);
+}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 </style>
 </head>
 <body>
 <div id="app">
-  <div id="header">
-    <h1>Job Swipe</h1>
-    <span id="counter">Loading...</span>
-  </div>
-  <a id="liked-bar" href="/" target="_blank">View liked jobs in desktop app ↗</a>
-  <div id="stack-area">
-    <div id="loading-state">
-      <div class="spinner"></div>
-      <span>Finding jobs...</span>
-    </div>
-    <div id="empty-state">
-      <div class="empty-icon">🎉</div>
-      <h2>You're all caught up!</h2>
-      <p>No more jobs to review right now.<br>Run your sources to discover more.</p>
-      <button onclick="location.reload()">Refresh</button>
+  <div id="hdr">
+    <div class="logo">Job<em>Swipe</em></div>
+    <div class="pill">
+      <div class="pill-dot"></div>
+      <span class="pill-txt" id="counter">Loading</span>
     </div>
   </div>
-  <div id="actions" style="display:none">
-    <button class="action-btn btn-nope" onclick="swipeAction('nope')" title="Not interested">✕</button>
-    <button class="action-btn btn-open" onclick="openJob()" title="Open job listing">↗</button>
-    <button class="action-btn btn-like" onclick="swipeAction('like')" title="Shortlist">♥</button>
+  <div id="stack">
+    <div id="loading">
+      <div class="spin"></div>
+      <span style="font-size:14px;color:#444">Finding jobs for you...</span>
+    </div>
+    <div id="empty">
+      <div class="ei">✨</div>
+      <h2>You're all caught up</h2>
+      <p>No more jobs to review right now.<br>Your sources will find more automatically.</p>
+      <button onclick="location.reload()">Check again</button>
+    </div>
+  </div>
+  <div id="actions">
+    <div class="liked-bar" id="liked-bar">
+      <span>❤️</span><span id="liked-txt">0 saved to your apply queue</span>
+    </div>
+    <div class="abtns">
+      <button class="abtn nope-btn" onclick="swipe('nope')" aria-label="Pass">✕</button>
+      <button class="abtn open-btn" onclick="openJob()" aria-label="Open listing">↗</button>
+      <button class="abtn like-btn" onclick="swipe('like')" aria-label="Like">♥</button>
+    </div>
   </div>
 </div>
-<div id="apply-sheet" class="apply-sheet">
-  <div class="sheet-handle"></div>
-  <div class="sheet-co" id="sheet-co"></div>
-  <div class="sheet-ttl" id="sheet-ttl"></div>
-  <div class="sheet-btns">
-    <button class="sheet-apply-btn" onclick="applyNow()">Apply Now →</button>
-    <button class="sheet-later-btn" onclick="hideApplySheet()">Later</button>
+<div class="backdrop" id="backdrop" onclick="hideSheet()"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-grip"><div class="grip"></div></div>
+  <div class="sheet-body">
+    <div class="sheet-lbl">Saved to queue ❤️</div>
+    <div class="sheet-co" id="sco"></div>
+    <div class="sheet-ttl" id="sttl"></div>
+    <div class="sheet-btns">
+      <button class="s-apply" onclick="applyNow()">Apply Now →</button>
+      <button class="s-later" onclick="hideSheet()">Later</button>
+    </div>
   </div>
 </div>
 <div id="toast"></div>
-
 <script>
-let jobs = [];
-let currentIndex = 0;
-let likedCount = 0;
-let isDragging = false;
-let currentApplyJob = null;
-let sheetTimer = null;
-let startX = 0, startY = 0, lastX = 0, lastY = 0;
-let cardEl = null;
+'use strict';
+const GRADS=[['#667eea','#764ba2'],['#f093fb','#f5576c'],['#4facfe','#00f2fe'],
+  ['#43e97b','#38f9d7'],['#fa709a','#fee140'],['#a18cd1','#fbc2eb'],
+  ['#fd7f6f','#b2e0fb'],['#11998e','#38ef7d'],['#f7971e','#ffd200'],['#00c6ff','#0072ff']];
 
-const stackArea = document.getElementById('stack-area');
-const actions = document.getElementById('actions');
-const counter = document.getElementById('counter');
-const emptyState = document.getElementById('empty-state');
-const loadingState = document.getElementById('loading-state');
-const likedBar = document.getElementById('liked-bar');
+let jobs=[],idx=0,liked=0,dragging=false,startX=0,startY=0,lastX=0,topCard=null,applyJob=null,stimer=null,ttimer=null;
 
-async function loadJobs() {
-  try {
-    const res = await fetch('/api/swipe/jobs');
-    const data = await res.json();
-    jobs = data.jobs || [];
-    currentIndex = 0;
-    loadingState.style.display = 'none';
-    renderStack();
-  } catch (e) {
-    loadingState.innerHTML = '<p style="color:#ef4444">Failed to load jobs. Is the server running?</p>';
-  }
+function grad(n){
+  if(!n)return`linear-gradient(135deg,${GRADS[0][0]},${GRADS[0][1]})`;
+  let h=0;for(let i=0;i<n.length;i++)h=(h*31+n.charCodeAt(i))>>>0;
+  const g=GRADS[h%GRADS.length];return`linear-gradient(135deg,${g[0]},${g[1]})`;
+}
+function scoreCol(s){return s>=70?'#22c55e':s>=45?'#f59e0b':s>=20?'#818cf8':'#E5E7EB'}
+function rtype(j){
+  const t=((j.location||'')+(j.description_snippet||'')).toLowerCase();
+  if(t.includes('remote'))return'r';
+  if(t.includes('hybrid'))return'h';
+  return'o';
+}
+function cleanDesc(t){
+  return(t||'').replace(/\n{3,}/g,'\n\n').replace(/[ \t]+\n/g,'\n').trim();
+}
+function esc(s){
+  return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function getRemoteTag(job) {
-  const loc = (job.location || '').toLowerCase();
-  const desc = (job.description_snippet || '').toLowerCase();
-  if (loc.includes('remote') || desc.includes('fully remote') || desc.includes('100% remote')) return 'remote';
-  if (loc.includes('hybrid') || desc.includes('hybrid')) return 'hybrid';
-  return 'onsite';
-}
-
-function scoreTag(score) {
-  if (score >= 70) return 'score-high';
-  if (score >= 40) return 'score-mid';
-  return '';
-}
-
-function companyInitial(company) {
-  return (company || '?').trim().charAt(0).toUpperCase();
-}
-
-function makeCard(job, zIndex) {
-  const card = document.createElement('div');
-  card.className = 'job-card';
-  card.style.zIndex = zIndex;
-
-  const remote = getRemoteTag(job);
-  const sc = scoreTag(job.score);
-  const loc = job.location || 'Location unknown';
-  const snippet = (job.description_snippet || '').replace(/\\n{3,}/g, '\\n\\n').trim();
-
-  card.innerHTML = `
-    <div class="indicator like">LIKE</div>
-    <div class="indicator nope">NOPE</div>
-    <div class="card-top">
-      <div class="company-row">
-        <div class="company-avatar">${companyInitial(job.company)}</div>
-        <div class="company-meta">
-          <div class="company-name">${esc(job.company)}</div>
-          <div class="source-badge">${esc(job.source || '')}</div>
-        </div>
-      </div>
-      <div class="job-title">${esc(job.title)}</div>
-      <div class="tags-row">
-        <span class="tag ${remote}">${remote.charAt(0).toUpperCase() + remote.slice(1)}</span>
-        ${loc !== 'Location unknown' ? `<span class="tag">📍 ${esc(loc)}</span>` : ''}
-        ${sc ? `<span class="tag ${sc}">Score ${job.score}</span>` : ''}
+function buildCard(job){
+  const el=document.createElement('div');
+  el.className='jcard';
+  const rt=rtype(job);
+  const [rtLbl,rtCls]={r:['🌐 Remote','cr'],h:['🏢 Hybrid','ch'],o:['📍 On-site','co']}[rt];
+  const init=(job.company||'?').charAt(0).toUpperCase();
+  const desc=cleanDesc(job.description_snippet);
+  const sc=Math.min(100,job.score||0);
+  const loc=job.location&&!['remote','worldwide','anywhere'].includes((job.location||'').toLowerCase())
+    ?job.location:'';
+  el.innerHTML=`
+    <div class="stamp sl">LIKE</div>
+    <div class="stamp sn">NOPE</div>
+    <div class="sbar"><div class="sbar-fill" style="width:${sc}%;background:${scoreCol(job.score||0)}"></div></div>
+    <div class="chdr">
+      <div class="avatar" style="background:${grad(job.company)}">${init}</div>
+      <div class="cinfo">
+        <div class="cname">${esc(job.company||'Unknown')}</div>
+        <span class="stag">${esc(job.source||'job board')}</span>
       </div>
     </div>
-    <div class="card-body">
-      <p>${esc(snippet) || '<span style="color:#9ca3af">No description available.</span>'}</p>
+    <div class="ctitle">
+      <div class="jtitle">${esc(job.title||'Untitled role')}</div>
     </div>
-  `;
-  return card;
+    <div class="chips">
+      <span class="chip ${rtCls}">${rtLbl}</span>
+      ${loc?`<span class="chip cl">📍 ${esc(loc)}</span>`:''}
+      ${(job.score||0)>0?`<span class="chip cs">★ ${job.score}</span>`:''}
+    </div>
+    <div class="cdesc">
+      <div class="cdesc-inner">
+        <p class="cdesc-txt">${desc?esc(desc):'<span style="color:#9CA3AF;font-style:italic">No description available.</span>'}</p>
+      </div>
+    </div>`;
+  return el;
 }
 
-function esc(str) {
-  return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-function renderStack() {
-  // Remove existing cards
-  stackArea.querySelectorAll('.job-card').forEach(c => c.remove());
-
-  const remaining = jobs.slice(currentIndex);
-
-  if (remaining.length === 0) {
-    emptyState.style.display = 'flex';
-    actions.style.display = 'none';
-    counter.textContent = 'All done';
+function renderStack(){
+  const stack=document.getElementById('stack');
+  stack.querySelectorAll('.jcard').forEach(c=>c.remove());
+  const rem=jobs.slice(idx);
+  const ctr=document.getElementById('counter');
+  ctr.textContent=rem.length?`${rem.length} left`:'All done';
+  if(!rem.length){
+    document.getElementById('empty').classList.add('on');
+    document.getElementById('actions').classList.remove('on');
     return;
   }
-
-  counter.textContent = `${remaining.length} left`;
-  actions.style.display = 'flex';
-  emptyState.style.display = 'none';
-
-  // Render top 3 cards (reversed so top card is on top)
-  const visible = remaining.slice(0, 3).reverse();
-  visible.forEach((job, i) => {
-    const realI = visible.length - 1 - i; // 0 = top card
-    const card = makeCard(job, 10 + i);
-    if (realI === 1) card.classList.add('behind-1');
-    if (realI === 2) card.classList.add('behind-2');
-    stackArea.appendChild(card);
-    if (realI === 0) {
-      attachDrag(card);
-      cardEl = card;
-    }
+  document.getElementById('empty').classList.remove('on');
+  document.getElementById('actions').classList.add('on');
+  rem.slice(0,3).reverse().forEach((job,ri)=>{
+    const realI=Math.min(rem.length,3)-1-ri;
+    const card=buildCard(job);
+    if(realI===1)card.classList.add('b1');
+    if(realI===2)card.classList.add('b2');
+    stack.appendChild(card);
+    if(realI===0){topCard=card;attachSwipe(card);}
   });
 }
 
-function attachDrag(card) {
-  let ox = 0, oy = 0;
-
-  function onStart(x, y) {
-    isDragging = true;
-    startX = x; startY = y; lastX = x; lastY = y;
-    card.classList.remove('snap-back');
+function attachSwipe(card){
+  function start(x,y){
+    dragging=true;startX=x;startY=y;lastX=x;
+    card.classList.remove('snapping');
   }
-
-  function onMove(x, y) {
-    if (!isDragging) return;
-    lastX = x; lastY = y;
-    ox = x - startX;
-    oy = y - startY;
-    const rot = ox * 0.08;
-    card.style.transform = `translate(${ox}px, ${oy}px) rotate(${rot}deg)`;
-
-    const likeEl = card.querySelector('.indicator.like');
-    const nopeEl = card.querySelector('.indicator.nope');
-    if (ox > 30) {
-      likeEl.style.opacity = Math.min(1, (ox - 30) / 80);
-      nopeEl.style.opacity = 0;
-    } else if (ox < -30) {
-      nopeEl.style.opacity = Math.min(1, (-ox - 30) / 80);
-      likeEl.style.opacity = 0;
-    } else {
-      likeEl.style.opacity = 0;
-      nopeEl.style.opacity = 0;
+  function move(x,y){
+    if(!dragging)return;
+    lastX=x;
+    const dx=x-startX,dy=y-startY;
+    card.style.transform=`translate(${dx}px,${dy*.35}px) rotate(${dx*.072}deg)`;
+    const p=Math.max(0,Math.min(1,(Math.abs(dx)-24)/100));
+    const sl=card.querySelector('.sl'),sn=card.querySelector('.sn');
+    if(dx>24){sl.style.opacity=p;sn.style.opacity=0;}
+    else if(dx<-24){sn.style.opacity=p;sl.style.opacity=0;}
+    else{sl.style.opacity=0;sn.style.opacity=0;}
+  }
+  function end(){
+    if(!dragging)return;dragging=false;
+    const dx=lastX-startX;
+    if(dx>95)doLike(card);
+    else if(dx<-95)doNope(card);
+    else{
+      card.classList.add('snapping');card.style.transform='';
+      card.querySelector('.sl').style.opacity=0;card.querySelector('.sn').style.opacity=0;
     }
   }
-
-  function onEnd() {
-    if (!isDragging) return;
-    isDragging = false;
-    const dx = lastX - startX;
-    if (dx > 100) {
-      doLike(card);
-    } else if (dx < -100) {
-      doNope(card);
-    } else {
-      card.classList.add('snap-back');
-      card.style.transform = '';
-      card.querySelector('.indicator.like').style.opacity = 0;
-      card.querySelector('.indicator.nope').style.opacity = 0;
-    }
-  }
-
-  card.addEventListener('touchstart', e => {
-    if (e.target.closest('.card-body')) return; // allow scroll in body
-    onStart(e.touches[0].clientX, e.touches[0].clientY);
-  }, { passive: true });
-  card.addEventListener('touchmove', e => {
-    if (!isDragging) return;
-    e.preventDefault();
-    onMove(e.touches[0].clientX, e.touches[0].clientY);
-  }, { passive: false });
-  card.addEventListener('touchend', () => onEnd());
-
-  // Mouse support for desktop testing
-  card.addEventListener('mousedown', e => {
-    if (e.target.closest('.card-body')) return;
-    onStart(e.clientX, e.clientY);
-    const move = ev => onMove(ev.clientX, ev.clientY);
-    const up = () => { onEnd(); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+  card.addEventListener('touchstart',e=>{
+    if(e.target.closest('.cdesc-inner'))return;
+    start(e.touches[0].clientX,e.touches[0].clientY);
+  },{passive:true});
+  card.addEventListener('touchmove',e=>{
+    if(!dragging)return;e.preventDefault();
+    move(e.touches[0].clientX,e.touches[0].clientY);
+  },{passive:false});
+  card.addEventListener('touchend',end);
+  card.addEventListener('touchcancel',()=>{dragging=false;});
+  card.addEventListener('mousedown',e=>{
+    if(e.target.closest('.cdesc-inner'))return;
+    start(e.clientX,e.clientY);
+    const mv=ev=>move(ev.clientX,ev.clientY);
+    const up=()=>{end();window.removeEventListener('mousemove',mv);window.removeEventListener('mouseup',up);};
+    window.addEventListener('mousemove',mv);window.addEventListener('mouseup',up);
   });
 }
 
-async function doLike(card) {
-  const job = jobs[currentIndex];
-  card.classList.add('fly-right');
-  await api('/api/jobs/status', { id: job.id, status: 'shortlisted' });
-  likedCount++;
-  likedBar.classList.add('show');
-  likedBar.textContent = `♥ ${likedCount} saved`;
-  showApplySheet(job);
+async function doLike(card){
+  const job=jobs[idx];
+  card.classList.add('fly-r');
+  await api('/api/jobs/status',{id:job.id,status:'shortlisted'});
+  liked++;
+  document.getElementById('liked-bar').classList.add('on');
+  document.getElementById('liked-txt').textContent=`${liked} saved to your apply queue`;
+  showSheet(job);advance();
+}
+async function doNope(card){
+  const job=jobs[idx];
+  card.classList.add('fly-l');
+  await api('/api/jobs/status',{id:job.id,status:'rejected',reject_reason:'swiped left'});
   advance();
 }
+function advance(){idx++;setTimeout(renderStack,420);}
 
-function showApplySheet(job) {
-  currentApplyJob = job;
-  document.getElementById('sheet-co').textContent = job.company || '';
-  document.getElementById('sheet-ttl').textContent = job.title || '';
-  document.getElementById('apply-sheet').classList.add('show');
-  clearTimeout(sheetTimer);
-  sheetTimer = setTimeout(hideApplySheet, 7000);
-}
-
-function hideApplySheet() {
-  document.getElementById('apply-sheet').classList.remove('show');
-  currentApplyJob = null;
-}
-
-function applyNow() {
-  if (currentApplyJob && currentApplyJob.url) window.open(currentApplyJob.url, '_blank');
-  hideApplySheet();
-}
-
-async function doNope(card) {
-  const job = jobs[currentIndex];
-  card.classList.add('fly-left');
-  await api('/api/jobs/status', { id: job.id, status: 'rejected', reject_reason: 'swiped left' });
-  toast('Passed');
-  advance();
-}
-
-function advance() {
-  currentIndex++;
-  setTimeout(() => renderStack(), 380);
-}
-
-function openJob() {
-  if (currentIndex >= jobs.length) return;
-  const job = jobs[currentIndex];
-  if (job.url) window.open(job.url, '_blank');
+function swipe(dir){if(topCard)dir==='like'?doLike(topCard):doNope(topCard);}
+function openJob(){
+  if(idx<jobs.length&&jobs[idx].url)window.open(jobs[idx].url,'_blank');
   else toast('No URL for this job');
 }
 
-function swipeAction(dir) {
-  if (!cardEl || currentIndex >= jobs.length) return;
-  if (dir === 'like') doLike(cardEl);
-  else doNope(cardEl);
+function showSheet(job){
+  applyJob=job;
+  document.getElementById('sco').textContent=job.company||'';
+  document.getElementById('sttl').textContent=job.title||'';
+  document.getElementById('sheet').classList.add('on');
+  document.getElementById('backdrop').classList.add('on');
+  clearTimeout(stimer);stimer=setTimeout(hideSheet,9000);
+}
+function hideSheet(){
+  document.getElementById('sheet').classList.remove('on');
+  document.getElementById('backdrop').classList.remove('on');
+  applyJob=null;
+}
+function applyNow(){
+  if(applyJob?.url)window.open(applyJob.url,'_blank');
+  hideSheet();
 }
 
-async function api(path, body) {
-  try {
-    await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch (e) { /* fire and forget */ }
+async function load(){
+  try{
+    const r=await fetch('/api/swipe/jobs');
+    const d=await r.json();
+    jobs=d.jobs||[];
+    document.getElementById('loading').style.display='none';
+    renderStack();
+  }catch(e){
+    document.getElementById('loading').innerHTML='<p style="color:#444;font-size:14px">Could not connect to server.</p>';
+  }
 }
-
-let toastTimer;
-function toast(msg) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+async function api(path,body){
+  try{await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}catch(_){}
 }
-
-loadJobs();
+function toast(msg){
+  const el=document.getElementById('toast');el.textContent=msg;el.classList.add('on');
+  clearTimeout(ttimer);ttimer=setTimeout(()=>el.classList.remove('on'),2200);
+}
+load();
 </script>
 </body>
 </html>"""
