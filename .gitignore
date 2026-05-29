@@ -6,4 +6,12 @@ playwright/.auth/
 *.pyc
 __pycache__/
 .env
+.env.local
+.env.*.local
 .DS_Store
+
+# Key and certificate files
+*.pem
+*.key
+*.p12
+*.pfx
